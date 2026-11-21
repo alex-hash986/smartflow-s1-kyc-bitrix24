@@ -1,0 +1,36 @@
+cases:
+  - {id: ul-01, scenario: green}
+  - {id: ul-02, scenario: green}
+  - {id: ul-03, scenario: green}
+  - {id: ul-04, scenario: green}
+  - {id: ul-05, scenario: green, replay: true}
+  - {id: ip-01, scenario: green, ip: true}
+  - {id: ip-02, scenario: green, ip: true}
+  - {id: ip-03, scenario: green, ip: true}
+  - {id: inn-ul, scenario: bad_inn, human: [true, true]}
+  - {id: inn-ip, scenario: bad_inn, ip: true, human: [true, true]}
+  - {id: ogrn-ul, scenario: bad_ogrn, human: [true, true]}
+  - {id: ogrn-ip, scenario: bad_ogrn, ip: true, human: [true, true]}
+  - {id: young-01, scenario: young_claims, human: [false, true]}
+  - {id: young-02, scenario: young_claims, human: [false, true]}
+  - {id: young-03, scenario: young_claims, ip: true, human: [false, true]}
+  - {id: young-04, scenario: young_claims, human: [false, true]}
+  - {id: young-05, scenario: young_claims, human: [false, true]}
+  - {id: arb-01, scenario: claims, human: [false, true]}
+  - {id: arb-02, scenario: claims, human: [false, true]}
+  - {id: arb-03, scenario: claims, ip: true, human: [false, true]}
+  - {id: stop-01, scenario: bankrupt, human: [true, true], stops: [BANKRUPTCY]}
+  - {id: stop-02, scenario: address, human: [true, true], stops: [FNS_ADDRESS_UNRELIABLE]}
+  - {id: stop-03, scenario: red, human: [true, true], stops: [BANKRUPTCY, FNS_ADDRESS_UNRELIABLE], replay: true}
+  - {id: stop-04, scenario: bankrupt, ip: true, human: [true, true], stops: [BANKRUPTCY]}
+  - {id: timeout-01, scenario: timeout, human: [true, true]}
+  - {id: timeout-02, scenario: timeout, human: [true, true], ip: true}
+  - {id: timeout-03, scenario: timeout, human: [true, true]}
+  - {id: scan-01, scenario: scan, human: [true, true]}
+  - {id: scan-02, scenario: scan, human: [true, true]}
+  - {id: scan-03, scenario: scan, human: [true, true]}
+  - {id: injection-01, scenario: injection, replay: true}
+  - {id: injection-02, scenario: injection, ip: true}
+  - {id: injection-03, scenario: injection}
+  - {id: injection-04, scenario: injection_llm}
+  - {id: injection-05, scenario: injection_refusal, human: [true, true]}

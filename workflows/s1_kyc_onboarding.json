@@ -1,0 +1,685 @@
+{
+  "name": "S1 · KYC onboarding (mock registries)",
+  "nodes": [
+    {
+      "id": "d31a1102-0000-4000-8000-000000000001",
+      "name": "S1 Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "s1-kyc-onboarding",
+        "authentication": "headerAuth",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "webhookId": "d31a1102-0000-4000-8000-000000000095"
+    },
+    {
+      "id": "d31a1102-0000-4000-8000-000000000002",
+      "name": "Normalize test application",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        240,
+        0
+      ],
+      "parameters": {
+        "jsCode": "const body = $input.first().json.body ?? {};\nconst {delivery_key, source_type, text, pdf_base64, scenario = 'green'} = body;\nconst isText = source_type === 'TEXT' && typeof text === 'string' && pdf_base64 == null;\nconst isPdf = source_type === 'PDF' && typeof pdf_base64 === 'string' && text == null;\nif (typeof delivery_key !== 'string' || delivery_key.trim() === ''\n    || !(isText || isPdf) || !['green','arbitration','bankruptcy','timeout'].includes(scenario)) {\n  return [{json:{statusCode:422,body:{detail:'Invalid S1 test application'}}}];\n}\nconst payload = {source_type, text:isText ? text : null, pdf_base64:isPdf ? pdf_base64 : null};\nreturn [{json:{statusCode:200,body:{\n  tenant_id:'portal_b24_b2b',source:'s1-test-webhook',delivery_key:delivery_key.trim(),\n  profile_slug:'portal_b24_b2b',profile_revision:'3',channel:'n8n',\n  is_after_hours:false,run_origin:'mock',payload:{...payload,scenario}\n}}}];"
+      }
+    },
+    {
+      "id": "d31a1102-0000-4000-8000-000000000003",
+      "name": "Respond",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.4,
+      "position": [
+        3900,
+        360
+      ],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ $json.body }}",
+        "options": {
+          "responseCode": "={{ $json.statusCode }}",
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Cache-Control",
+                "value": "no-store"
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "d31a1102-0000-4000-8000-000000000004",
+      "name": "Application valid",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        720,
+        0
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "d31a1102-0000-4000-8000-000000000103",
+              "leftValue": "={{ $json.statusCode === 200 }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "d31a1102-0000-4000-8000-000000000005",
+      "name": "Register delivery",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        960,
+        0
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "http://host.docker.internal:8021/v1/deliveries",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.body }}",
+        "options": {
+          "timeout": 60000,
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "d31a1102-0000-4000-8000-000000000006",
+      "name": "Delivery registered",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1200,
+        0
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "d31a1102-0000-4000-8000-000000000105",
+              "leftValue": "={{ $json.statusCode === 200 }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "d31a1102-0000-4000-8000-000000000007",
+      "name": "Parse requisites",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1440,
+        0
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "http://host.docker.internal:8021/s1/parse",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ {tenant_id:$('Normalize test application').first().json.body.tenant_id,request_id:$json.body.request_id,profile_slug:$json.body.profile_slug,profile_revision:$json.body.profile_revision,payload:{source_type:$('Normalize test application').first().json.body.payload.source_type,text:$('Normalize test application').first().json.body.payload.text,pdf_base64:$('Normalize test application').first().json.body.payload.pdf_base64} } }}",
+        "options": {
+          "timeout": 60000,
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "d31a1102-0000-4000-8000-000000000008",
+      "name": "Extraction complete",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1680,
+        0
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "d31a1102-0000-4000-8000-000000000107",
+              "leftValue": "={{ $json.statusCode === 200 }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "d31a1102-0000-4000-8000-000000000009",
+      "name": "Extraction needs human",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1920,
+        0
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "d31a1102-0000-4000-8000-000000000108",
+              "leftValue": "={{ $json.body.payload.need_human === true }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "d31a1102-0000-4000-8000-000000000010",
+      "name": "Call mock registries",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2160,
+        0
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "http://127.0.0.1:5678/webhook/s1-mock-registry",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ {inn:$json.body.payload.inn,ogrn:$json.body.payload.ogrn,scenario:$('Normalize test application').first().json.body.payload.scenario,observed_at:$('Register delivery').first().json.body.received_at} }}",
+        "options": {
+          "timeout": 60000,
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "d31a1102-0000-4000-8000-000000000011",
+      "name": "Normalize registry result",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2400,
+        0
+      ],
+      "parameters": {
+        "jsCode": "const result = $input.first().json;\nconst parsed = $('Parse requisites').first().json.body.payload;\nconst receipt = $('Register delivery').first().json.body;\nif (result.statusCode === 200 && result.body?.inn === parsed.inn && result.body?.ogrn === parsed.ogrn) {\n  return [{json:result.body}];\n}\nreturn [{json:{inn:parsed.inn,ogrn:parsed.ogrn,observed_at:receipt.received_at,\n  legal_entity_status:null,registration_age_months:null,charter_capital_rub:null,\n  tax_debt_rub:null,defendant_claims_rub:null,fns_address_unreliable:null,bankruptcy:null}}];"
+      }
+    },
+    {
+      "id": "d31a1102-0000-4000-8000-000000000012",
+      "name": "Evaluate S1",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2640,
+        0
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "http://host.docker.internal:8021/s1/evaluate",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ {tenant_id:$('Normalize test application').first().json.body.tenant_id,request_id:$('Register delivery').first().json.body.request_id,profile_slug:$('Register delivery').first().json.body.profile_slug,profile_revision:$('Register delivery').first().json.body.profile_revision,attempt:1,received_at:$('Register delivery').first().json.body.received_at,payload:{parsed:$('Parse requisites').first().json.body.payload,registry:$json} } }}",
+        "options": {
+          "timeout": 60000,
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "d31a1102-0000-4000-8000-000000000013",
+      "name": "Evaluation complete",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        2880,
+        0
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "d31a1102-0000-4000-8000-000000000112",
+              "leftValue": "={{ $json.statusCode === 200 }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "d31a1102-0000-4000-8000-000000000014",
+      "name": "Prepare approved publication",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        3120,
+        -170
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "http://host.docker.internal:8021/s1/publication/prepare",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ {tenant_id:$('Normalize test application').first().json.body.tenant_id,request_id:$('Register delivery').first().json.body.request_id,profile_slug:$('Register delivery').first().json.body.profile_slug,profile_revision:$('Register delivery').first().json.body.profile_revision,attempt:1} }}",
+        "options": {
+          "timeout": 60000,
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "d31a1102-0000-4000-8000-000000000015",
+      "name": "Publication prepared",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        3360,
+        0
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "d31a1102-0000-4000-8000-000000000114",
+              "leftValue": "={{ $json.statusCode === 200 }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "d31a1102-0000-4000-8000-000000000016",
+      "name": "Wait 600ms",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        3600,
+        0
+      ],
+      "parameters": {
+        "resume": "timeInterval",
+        "amount": 0.6,
+        "unit": "seconds"
+      },
+      "webhookId": "d31a1102-0000-4000-8000-000000000096"
+    },
+    {
+      "id": "d31a1102-0000-4000-8000-000000000017",
+      "name": "Dispatch publication",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        3840,
+        0
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "http://host.docker.internal:8021/v1/publications/dispatch",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.body }}",
+        "options": {
+          "timeout": 60000,
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        }
+      }
+    }
+  ],
+  "connections": {
+    "S1 Webhook": {
+      "main": [
+        [
+          {
+            "node": "Normalize test application",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize test application": {
+      "main": [
+        [
+          {
+            "node": "Application valid",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Application valid": {
+      "main": [
+        [
+          {
+            "node": "Register delivery",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Register delivery": {
+      "main": [
+        [
+          {
+            "node": "Delivery registered",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Delivery registered": {
+      "main": [
+        [
+          {
+            "node": "Parse requisites",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse requisites": {
+      "main": [
+        [
+          {
+            "node": "Extraction complete",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extraction complete": {
+      "main": [
+        [
+          {
+            "node": "Extraction needs human",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extraction needs human": {
+      "main": [
+        [
+          {
+            "node": "Prepare approved publication",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Call mock registries",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Call mock registries": {
+      "main": [
+        [
+          {
+            "node": "Normalize registry result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize registry result": {
+      "main": [
+        [
+          {
+            "node": "Evaluate S1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Evaluate S1": {
+      "main": [
+        [
+          {
+            "node": "Evaluation complete",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Evaluation complete": {
+      "main": [
+        [
+          {
+            "node": "Prepare approved publication",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare approved publication": {
+      "main": [
+        [
+          {
+            "node": "Publication prepared",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Publication prepared": {
+      "main": [
+        [
+          {
+            "node": "Wait 600ms",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait 600ms": {
+      "main": [
+        [
+          {
+            "node": "Dispatch publication",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Dispatch publication": {
+      "main": [
+        [
+          {
+            "node": "Respond",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "saveDataSuccessExecution": "none",
+    "saveDataErrorExecution": "none",
+    "saveManualExecutions": false,
+    "saveExecutionProgress": false
+  }
+}

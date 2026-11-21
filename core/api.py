@@ -1,0 +1,219 @@
+import asyncio
+import secrets
+import sqlite3
+from collections.abc import AsyncIterator, Mapping
+from contextlib import asynccontextmanager
+from typing import Annotated
+
+from fastapi import Depends, FastAPI, Header, HTTPException, Request
+from fastapi.responses import JSONResponse
+
+from core.b24_client import BitrixClient, BitrixError, PortalLimiter
+from core.config import Settings
+from core.contracts import Stage, WorkerRequestEnvelope, WorkerResponseEnvelope
+from core.database import Database
+from core.idempotency import Conflict, Delivery, Journal, PublicationKey, Receipt
+from core.interfaces import BaseSmartWorker
+from core.llm_gateway import CycleBudget, LLMGateway
+from core.publisher import Publisher
+from core.telemetry import Telemetry
+from modules.s1_kyc.contracts import S1EvaluateCall, S1ParseCall
+from modules.s1_kyc.module import S1ParseReply, S1Worker
+from modules.s1_kyc.publication import S1PublicationRequest, prepare_s1_publication
+
+
+def create_app(
+    settings: Settings,
+    workers: Mapping[Stage, BaseSmartWorker] | None = None,
+    *,
+    publisher: Publisher | None = None,
+    gateway: LLMGateway | None = None,
+) -> FastAPI:
+    db = Database(settings.sqlite_path)
+    journal, telemetry = Journal(db), Telemetry(db)
+    registered = dict(workers or {})
+    llm = gateway if gateway is not None else LLMGateway(settings)
+    s1 = S1Worker(settings.profiles_path, llm, db)
+    registered.setdefault("S1", s1)
+
+    @asynccontextmanager
+    async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+        await asyncio.to_thread(db.initialize)
+        try:
+            yield
+        finally:
+            if gateway is None:
+                await llm.aclose()
+            if publisher is not None:
+                await publisher.client.aclose()
+
+    app = FastAPI(lifespan=lifespan)
+
+    def authenticate(
+        token: Annotated[str | None, Header(alias="X-Smartflow-Token")] = None,
+    ) -> None:
+        expected = settings.worker_token
+        if (
+            expected is None
+            or not token
+            or not secrets.compare_digest(
+                token.encode(),
+                expected.get_secret_value().encode(),
+            )
+        ):
+            raise HTTPException(401, "Invalid service credentials")
+
+    @app.exception_handler(Conflict)
+    async def conflict(request: Request, exc: Conflict) -> JSONResponse:
+        return JSONResponse({"detail": str(exc)}, status_code=409)
+
+    @app.exception_handler(sqlite3.OperationalError)
+    async def unavailable(request: Request, exc: sqlite3.OperationalError) -> JSONResponse:
+        return JSONResponse({"detail": "Journal temporarily unavailable"}, status_code=503)
+
+    @app.get("/health")
+    def health() -> dict[str, str]:
+        with db.connect() as conn:
+            if conn.execute("PRAGMA journal_mode").fetchone()[0] != "wal":
+                raise HTTPException(503, "WAL not available")
+            conn.execute("SELECT 1 FROM idempotency_records LIMIT 1")
+        return {"status": "ok"}
+
+    @app.post("/v1/deliveries", dependencies=[Depends(authenticate)])
+    def register(delivery: Delivery) -> Receipt:
+        return journal.register(delivery)
+
+    @app.post(
+        "/v1/workers/{stage}/run",
+        response_model=WorkerResponseEnvelope,
+        dependencies=[Depends(authenticate)],
+    )
+    async def run(
+        stage: Stage, envelope: WorkerRequestEnvelope
+    ) -> WorkerResponseEnvelope | JSONResponse:
+        if stage != envelope.stage:
+            raise HTTPException(422, "Stage and route differ")
+        worker = registered.get(stage)
+        if worker is None:
+            raise HTTPException(503, "No worker registered for this stage")
+        try:
+            if isinstance(worker, S1Worker):
+                await asyncio.to_thread(worker.validate_request, envelope)
+            else:
+                worker.request_payload.model_validate(envelope.payload)
+        except ValueError as exc:
+            if isinstance(exc, Conflict):
+                raise
+            raise HTTPException(422, "Invalid worker input payload") from None
+        attempt = await asyncio.to_thread(telemetry.reserve, envelope)
+        if attempt.response is not None:
+            return attempt.response
+        if attempt.status == "running":
+            return JSONResponse(
+                {"status": "running"}, status_code=202, headers={"Retry-After": "1"}
+            )
+        try:
+            budget = CycleBudget(
+                await asyncio.to_thread(
+                    telemetry.remaining_budget,
+                    envelope.tenant_id,
+                    envelope.request_id,
+                    settings.max_cycle_cost_rub,
+                )
+            )
+            result = await worker.run(envelope, budget)
+            if result.envelope.payload is not None:
+                worker.response_payload.model_validate(result.envelope.payload)
+            await asyncio.to_thread(
+                telemetry.complete,
+                envelope,
+                result.envelope,
+                tokens_in=result.tokens_in,
+                tokens_out=result.tokens_out,
+                prompt_versions=list(result.prompt_versions),
+            )
+        except asyncio.CancelledError:
+            await asyncio.shield(
+                asyncio.to_thread(
+                    telemetry.fail,
+                    envelope,
+                    "worker_interrupted",
+                    interrupted=True,
+                )
+            )
+            raise
+        except Exception:  # noqa: BLE001 - isolate failures from registered plugins
+            await asyncio.to_thread(telemetry.fail, envelope, "worker_failed")
+            raise HTTPException(503, "Worker failed") from None
+        return result.envelope
+
+    @app.post(
+        "/s1/parse",
+        response_model=S1ParseReply,
+        dependencies=[Depends(authenticate)],
+    )
+    async def parse_s1(call: S1ParseCall) -> S1ParseReply | JSONResponse:
+        limit = await asyncio.to_thread(
+            telemetry.remaining_budget,
+            call.tenant_id,
+            call.request_id,
+            settings.max_cycle_cost_rub,
+        )
+        reply = await asyncio.shield(s1.parse(call, CycleBudget(limit)))
+        if reply == "running":
+            return JSONResponse(
+                {"status": "running"},
+                status_code=202,
+                headers={"Retry-After": "1"},
+            )
+        return reply
+
+    @app.post(
+        "/s1/evaluate",
+        response_model=WorkerResponseEnvelope,
+        dependencies=[Depends(authenticate)],
+    )
+    async def evaluate_s1(call: S1EvaluateCall) -> WorkerResponseEnvelope | JSONResponse:
+        envelope = WorkerRequestEnvelope(
+            **call.model_dump(exclude={"payload"}),
+            schema_version="1",
+            stage="S1",
+            upstream_item=None,
+            payload=call.payload.model_dump(mode="json"),
+        )
+        return await run("S1", envelope)
+
+    @app.post("/s1/publication/prepare", dependencies=[Depends(authenticate)])
+    def prepare_s1(call: S1PublicationRequest) -> PublicationKey:
+        if publisher is None:
+            raise HTTPException(503, "No publication dispatcher configured")
+        return prepare_s1_publication(journal, settings.profiles_path, publisher.portal_id, call)
+
+    @app.post("/v1/publications/dispatch", dependencies=[Depends(authenticate)])
+    async def dispatch(key: PublicationKey) -> dict[str, str | int | None]:
+        if publisher is None:
+            raise HTTPException(503, "No publication dispatcher configured")
+        try:
+            state = await publisher.dispatch(key)
+        except BitrixError:
+            raise HTTPException(502, "Bitrix24 write requires reconciliation") from None
+        return {
+            "status": state.status,
+            "item_id": state.item_id,
+            "task_id": state.task_id,
+            **({"comment_id": state.comment_id} if state.command.timeline_comment else {}),
+        }
+
+    return app
+
+
+def app_factory() -> FastAPI:
+    settings = Settings()
+    if settings.bitrix24_webhook_url is None:
+        return create_app(settings)
+    url = settings.bitrix24_webhook_url.get_secret_value()
+    client = BitrixClient(url, PortalLimiter(settings.bitrix24_rate_limit_rps))
+    return create_app(
+        settings,
+        publisher=Publisher(Journal(Database(settings.sqlite_path)), client, client.portal_id),
+    )

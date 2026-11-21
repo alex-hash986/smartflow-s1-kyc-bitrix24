@@ -1,0 +1,93 @@
+{
+  "name": "S1 · Mock registries",
+  "nodes": [
+    {
+      "id": "d31a1101-0000-4000-8000-000000000001",
+      "name": "Registry Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "s1-mock-registry",
+        "authentication": "headerAuth",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "webhookId": "d31a1101-0000-4000-8000-000000000095"
+    },
+    {
+      "id": "d31a1101-0000-4000-8000-000000000002",
+      "name": "Parallel mock registry snapshot",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        240,
+        0
+      ],
+      "parameters": {
+        "jsCode": "const input = $input.first().json.body ?? {};\nconst { inn, ogrn, scenario, observed_at } = input;\nconst date = typeof observed_at === 'string' ? Date.parse(observed_at) : NaN;\nconst ip = typeof inn === 'string' && inn.length === 12;\nconst innWeights = ip\n  ? [[7,2,4,10,3,5,9,4,6,8],[3,7,2,4,10,3,5,9,4,6,8]]\n  : [[2,4,10,3,5,9,4,6,8]];\nconst validInn = typeof inn === 'string' && /^(?:[0-9]{10}|[0-9]{12})$/.test(inn)\n  && innWeights.every(weights => weights.reduce(\n    (sum, weight, index) => sum + weight * Number(inn[index]), 0\n  ) % 11 % 10 === Number(inn[weights.length]));\nconst validOgrn = typeof ogrn === 'string' && (ip ? /^[0-9]{15}$/ : /^[0-9]{13}$/).test(ogrn)\n  && Number(BigInt(ogrn.slice(0, -1)) % (ip ? 13n : 11n) % 10n) === Number(ogrn.slice(-1));\nif (!validInn || !validOgrn || !Number.isFinite(date)\n    || !['green','arbitration','bankruptcy','timeout'].includes(scenario)) {\n  return [{json:{statusCode:422,body:{detail:'Invalid mock registry input'}}}];\n}\nconst timeout = scenario === 'timeout';\nconst young = scenario === 'arbitration';\nconst stop = scenario === 'bankruptcy';\nconst [fns, kad, enforcement] = await Promise.all([\n  Promise.resolve().then(() => ({\n    legal_entity_status: timeout ? null : 'ACTIVE',\n    registration_age_months: timeout ? null : young ? 8 : 48,\n    charter_capital_rub: timeout || ip ? null : '10000.00',\n    fns_address_unreliable: timeout ? null : stop,\n  })),\n  Promise.resolve().then(() => ({\n    defendant_claims_rub: timeout ? null : young ? '600000.00' : '0.00',\n  })),\n  Promise.resolve().then(() => ({\n    tax_debt_rub: timeout ? null : '0.00', bankruptcy: timeout ? null : stop,\n  })),\n]);\nreturn [{json:{statusCode:200,body:{inn,ogrn,...fns,...kad,...enforcement,\n  observed_at:new Date(date).toISOString()}}}];"
+      }
+    },
+    {
+      "id": "d31a1101-0000-4000-8000-000000000003",
+      "name": "Respond",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.4,
+      "position": [
+        480,
+        0
+      ],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ $json.body }}",
+        "options": {
+          "responseCode": "={{ $json.statusCode }}",
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Cache-Control",
+                "value": "no-store"
+              }
+            ]
+          }
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Registry Webhook": {
+      "main": [
+        [
+          {
+            "node": "Parallel mock registry snapshot",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parallel mock registry snapshot": {
+      "main": [
+        [
+          {
+            "node": "Respond",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "saveDataSuccessExecution": "none",
+    "saveDataErrorExecution": "none",
+    "saveManualExecutions": false,
+    "saveExecutionProgress": false
+  }
+}

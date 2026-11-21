@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>S1 · Проверка контрагента</title>
+<style>
+:root{color-scheme:dark;--bg:#0b1519;--panel:#12232a;--ink:#eef8f6;--muted:#a9bfc2;--line:#2b4248;--mint:#6ef3c2;--orange:#ffb77b}
+*{box-sizing:border-box}html{scroll-behavior:smooth}body{margin:0;background:var(--bg);color:var(--ink);font:1rem/1.6 "Segoe UI",system-ui,sans-serif}a{color:var(--mint)}header,main,footer{width:min(1120px,calc(100% - 36px));margin:auto}nav{display:flex;justify-content:space-between;align-items:center;gap:16px;border-bottom:1px solid var(--line);padding:20px 0}nav div{display:flex;gap:20px;flex-wrap:wrap}nav a{font-weight:600;text-decoration:none}.hero{padding:clamp(48px,9vw,110px) 0 42px;background:radial-gradient(ellipse at 85% 0%,#1c3c3a,transparent 55%)}h1,h2,h3,p{margin-top:0}h1{font-size:clamp(2.7rem,7.5vw,6rem);letter-spacing:-.075em;line-height:1;max-width:900px;margin-bottom:24px}h2{font-size:clamp(1.85rem,4.5vw,3rem);letter-spacing:-.045em;line-height:1.12;margin-bottom:24px}.lede{color:var(--muted);font-size:1.16rem;max-width:690px}.eyebrow{font-size:.88rem;color:var(--mint);font-weight:700;letter-spacing:.08em}.kpis,.flow,.cards,.calc{display:grid;gap:14px}.kpis{grid-template-columns:repeat(3,1fr)}.kpi,.card,.out{border:1px solid var(--line);border-radius:16px;background:var(--panel);padding:22px}.kpi strong,.out strong{display:block;color:var(--mint);font-size:clamp(1.7rem,4.1vw,2.8rem);line-height:1.08;letter-spacing:-.04em}.kpi span,small,.muted{color:var(--muted)}section{padding:48px 0;border-top:1px solid var(--line)}.flow{grid-template-columns:repeat(4,1fr);padding:0;list-style:none}.flow li{border:1px solid var(--line);border-radius:12px;padding:16px;border-top:3px solid var(--mint)}.flow strong{display:block;margin-bottom:4px}.flow span{color:var(--muted)}.table-wrap{overflow-x:auto}.metric{border-collapse:collapse;width:100%;min-width:500px}th,td{text-align:left;border-bottom:1px solid var(--line);padding:12px 14px}th{color:var(--mint)}.cards,.calc{grid-template-columns:1fr 1fr}.review{border-color:#80583e}.review h3{color:var(--orange)}details{border:1px solid var(--line);padding:14px 18px;border-radius:12px;margin-top:18px}summary{cursor:pointer;font-weight:650}pre{white-space:pre-wrap;overflow-wrap:anywhere;background:var(--bg);border-radius:10px;padding:16px;font: .9rem/1.5 ui-monospace,Consolas,monospace}.inputs{display:grid;grid-template-columns:1fr 1fr;gap:12px}label{display:grid;gap:4px;color:var(--muted);font-size:.9rem}input,select{width:100%;font:inherit;color:var(--ink);background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:9px}.out p{margin:0 0 16px}.out p:last-child{margin-bottom:0}.out strong{margin-top:6px}.calc small{display:block;margin-top:12px}footer{padding:25px 0 44px;color:var(--muted);border-top:1px solid var(--line)}:focus-visible{outline:2px solid var(--mint);outline-offset:4px}
+@media(max-width:730px){.flow{grid-template-columns:1fr 1fr}.cards,.calc{grid-template-columns:1fr}.kpi,.card{padding:13px}nav{align-items:flex-start}.kpi span{font-size:.9rem}}@media(max-width:380px){.kpis{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<header><nav aria-label="Разделы"><strong>SMARTFLOW / S1</strong><div><a href="#results">Результаты</a><a href="#economics">Калькулятор</a></div></nav></header>
+<main>
+<div class="hero"><p class="eyebrow">Техническая приёмка · 21 ноября 2026</p><h1>Проверка контрагента</h1><p class="lede">От заявки ЮЛ или ИП до подтверждённой карточки Bitrix24. Риск и кредитный лимит рассчитываются по профилю, а спорные случаи поступают в очередь СБ.</p>
+<div class="kpis"><div class="kpi"><strong>35</strong><span>заявок на профиль</span></div><div class="kpi"><strong>5/5</strong><span>стоп-факторов выявлено на профиль</span></div><div class="kpi"><strong>2</strong><span>карточки на тестовом портале</span></div></div></div>
+<section aria-labelledby="system"><h2 id="system">Как проходит проверка</h2><ol class="flow" aria-label="Маршрут заявки"><li><strong>n8n</strong><span>Регистрирует доставку и собирает снимок реестров.</span></li><li><strong>FastAPI</strong><span>Проверяет реквизиты, риск и допустимый лимит.</span></li><li><strong>SQLite</strong><span>Закрепляет решение, ключ и шаги публикации.</span></li><li><strong>Bitrix24</strong><span>Хранит карточку, досье и очередь СБ. Одобрение открывает S2.</span></li></ol></section>
+<section id="results"><h2>Результаты benchmark</h2><div class="table-wrap"><table class="metric"><thead><tr><th scope="col">Метрика</th><th scope="col">Базовый B2B</th><th scope="col">Стройпоставка</th></tr></thead><tbody>
+<tr><th scope="row">Автоодобрение</th><td>20 / 35 · 57,1%</td><td>12 / 35 · 34,3%</td></tr>
+<tr><th scope="row">Эскалация</th><td>15 / 35 · 42,9%</td><td>23 / 35 · 65,7%</td></tr>
+<tr><th scope="row">p50 / p95</th><td>459,65 / 535,85 мс</td><td>477,80 / 521,66 мс</td></tr>
+<tr><th scope="row">Стоп-факторы TP / FP / FN</th><td>5 / 0 / 0</td><td>5 / 0 / 0</td></tr>
+<tr><th scope="row">Нулевой расход, детерминированные</th><td>30 / 30</td><td>30 / 30</td></tr>
+</tbody></table></div><p class="muted">Источник: SQLite benchmark, 70 парных циклов в сумме. Реестры и LLM подменены. Оба профиля совпали с разметкой маршрута в 35/35 случаях.</p></section>
+<section><h2>Что увидела служба безопасности</h2><div class="cards">
+<article class="card"><h3>Зелёный коридор</h3><p>Карточка <strong>#1</strong>, комментарий #57. Одобрено 250 000 ₽, балл 100.00. Допуск в S2 подтверждён.</p><small>Повтор доставки оставил одну карточку и один комментарий.</small></article>
+<article class="card review"><h3>Ручная проверка</h3><p>Карточка <strong>#3</strong>, комментарий #61. Банкротство и недостоверный адрес перевели заявку в CRITICAL с рекомендацией 0 ₽. Допуск в S2 закрыт.</p><small>Данные заявок и реестров синтетические. Публикации проверены на живом тестовом портале.</small></article></div>
+<details><summary>Пример Markdown-досье из benchmark</summary><pre># Досье S1
+
+- Наименование: Контрагент S1-23
+- ИНН: 9900000232
+- ОГРН / ОГРНИП: 1269900000237
+- Снимок: 2026-11-20T22:38:29.926609+00:00
+
+## Факты реестров
+- legal_entity_status: ACTIVE
+- registration_age_months: 48
+- charter_capital_rub: 10000.00
+- tax_debt_rub: 0.00
+- defendant_claims_rub: 0.00
+- fns_address_unreliable: True
+- bankruptcy: True
+
+## Оценка
+- Балл: 100.00
+- Риск: CRITICAL
+- Стоп-факторы: BANKRUPTCY, FNS_ADDRESS_UNRELIABLE
+- Причины эскалации: BANKRUPTCY, FNS_ADDRESS_UNRELIABLE, RISK_REVIEW
+
+## Рекомендация
+- Лимит: 0.00 руб.
+- Условия: предоплата</pre></details></section>
+<section id="economics"><h2>Калькулятор окупаемости</h2><p class="muted">Доля эскалаций взята из benchmark. Минуты, ставки и расходы заданы как допущения для пилота.</p>
+<div class="calc"><form id="calculator" class="card"><div class="inputs">
+<label>Профиль<select id="profile"><option value="default_b2b">Базовый B2B</option><option value="construction_supply">Стройпоставка</option></select></label>
+<label>Заявок в месяц<input id="volume" type="number" min="0" step="1" value="100"></label>
+<label>До внедрения, мин<input id="manual" type="number" min="0" value="20"></label>
+<label>Автоматический кейс, мин<input id="auto" type="number" min="0" value="3"></label>
+<label>Эскалация, мин<input id="review" type="number" min="0" value="15"></label>
+<label>Ставка, ₽/ч<input id="rate" type="number" min="0" value="1200"></label>
+<label>Регулярные расходы, ₽/мес.<input id="opex" type="number" min="0" value="15000"></label>
+<label>Расход на заявку, ₽<input id="variable" type="number" min="0" step=".01" value="0"></label>
+<label>Внедрение, ₽<input id="capex" type="number" min="0" value="120000"></label>
+</div><small id="share"></small></form>
+<div class="out" aria-live="polite"><p>Экономия времени в месяц<strong id="hours">19,76 ч</strong></p><p>Чистый эффект в месяц<strong id="net">8 714 ₽</strong></p><p>До окупаемости<strong id="payback">13,8 мес.</strong></p></div></div></section>
+</main>
+<footer>Далее · пилот с живыми реестрами, утверждённый контракт S2 и сквозная сверка S3. <a href="../passport.md">Паспорт S1</a></footer>
+<script>
+const shares={default_b2b:15/35,construction_supply:23/35};
+const byId=id=>document.getElementById(id);
+const value=id=>Math.max(0,byId(id).valueAsNumber||0);
+const format=(value,digits=0)=>new Intl.NumberFormat('ru-RU',{maximumFractionDigits:digits,minimumFractionDigits:digits}).format(value);
+function update(){
+  const share=shares[byId('profile').value], count=value('volume');
+  const hours=(value('manual')-(1-share)*value('auto')-share*value('review'))*count/60;
+  const net=hours*value('rate')-value('opex')-value('variable')*count;
+  byId('share').textContent='Доля эскалаций '+format(share*100,1)+'%';
+  byId('hours').textContent=format(hours,2)+' ч';
+  byId('net').textContent=format(net)+' ₽';
+  byId('payback').textContent=net>0?format(value('capex')/net,1)+' мес.':'Нет при этих вводных';
+}
+byId('calculator').addEventListener('input',update);
+byId('calculator').addEventListener('submit',event=>event.preventDefault());
+update();
+</script>
+</body></html>

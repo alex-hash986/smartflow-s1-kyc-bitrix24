@@ -1,0 +1,60 @@
+# Шаблон Фазы 2. Портальные привязки заполняются на S1.3.
+slug: construction_supply
+revision: "2"
+template: true
+tenant_id: null
+portal_id: null
+timezone: Asia/Novosibirsk
+stages:
+  S1:
+    entity_type_id: null
+    category_id: null
+    stage_id: null
+    external_key_field: null
+    responsible_id: null
+escalation_reasons:
+  - PARSE_MISSING_FIELD
+  - PARSE_AMBIGUOUS_FIELD
+  - PARSE_INVALID_FIELD
+  - PARSE_SOURCE_UNREADABLE
+  - PARSE_SOURCE_LIMIT
+  - PARSE_BUDGET_EXCEEDED
+  - PARSE_LLM_UNAVAILABLE
+  - REGISTRY_INCOMPLETE
+  - REGISTRY_STALE
+  - RISK_REVIEW
+  - ENTITY_NOT_ACTIVE
+  - FNS_ADDRESS_UNRELIABLE
+  - BANKRUPTCY
+s1_kyc:
+  extraction:
+    max_text_chars: 50000
+    max_pdf_bytes: 10485760
+  registry:
+    max_age_hours: 24
+  scoring:
+    penalties:
+      - {field: registration_age_months, operator: lt, threshold: 24, points: "25.00"}
+      - {field: tax_debt_rub, operator: gt, threshold: "0.00", points: "15.00"}
+      - {field: defendant_claims_rub, operator: gt, threshold: "0.00", points: "20.00"}
+      - {field: defendant_claims_rub, operator: gt, threshold: "500000.00", points: "25.00"}
+    stop_factors:
+      ENTITY_NOT_ACTIVE: {field: legal_entity_status, operator: ne, value: ACTIVE}
+      FNS_ADDRESS_UNRELIABLE: {field: fns_address_unreliable, operator: eq, value: true}
+      BANKRUPTCY: {field: bankruptcy, operator: eq, value: true}
+    risk_bands:
+      LOW: {min_score: "80.00", max_credit_limit_rub: "500000.00", deferment_days: 30}
+      MEDIUM: {min_score: "60.00", max_credit_limit_rub: "150000.00", deferment_days: 7}
+      HIGH: {min_score: "35.00", max_credit_limit_rub: "0.00", deferment_days: 0}
+      CRITICAL: {min_score: "0.00", max_credit_limit_rub: "0.00", deferment_days: 0}
+    manual_review_risk_levels: [HIGH, CRITICAL]
+  bitrix24:
+    fields:
+      INN: null
+      OGRN: null
+      KYC_STATUS: null
+      RELIABILITY_SCORE: null
+      APPROVED_CREDIT_LIMIT_RUB: null
+    kyc_status_values:
+      APPROVED: null
+      REJECTED: null
