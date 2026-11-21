@@ -156,6 +156,75 @@ S1_REASONS = frozenset(
 )
 
 
+class S2Weights(StrictDTO):
+    price: DecimalString
+    delivery: DecimalString
+    s1_reliability: DecimalString
+    deferment: DecimalString
+
+    @model_validator(mode="after")
+    def check_total(self) -> Self:
+        if sum(map(Decimal, self.model_dump().values())) != Decimal("100.00"):
+            raise ValueError("S2 weights must sum to 100.00")
+        return self
+
+
+class S2StageIDs(StrictDTO):
+    initial: Nonempty | None = None
+    awarded: Nonempty | None
+    review: Nonempty | None
+    cancelled: Nonempty | None
+
+
+class S2BitrixFields(StrictDTO):
+    TENDER_STATUS: Nonempty | None
+    WINNER_INN: Nonempty | None
+    WINNER_S1_ITEM_ID: Nonempty | None
+    TOTAL_AMOUNT_RUB: Nonempty | None
+    SAVINGS_RUB: Nonempty | None
+    EXTERNAL_KEY: Nonempty | None
+
+
+class S2StatusValues(StrictDTO):
+    AWARDED: PositiveID | None
+    REVIEW_REQUIRED: PositiveID | None
+    CANCELLED: PositiveID | None
+
+
+class S2BitrixProfile(StrictDTO):
+    type_id: PositiveID | None = None
+    entity_type_id: PositiveID | None
+    category_id: NonnegativeInt | None
+    responsible_id: PositiveID | None
+    stage_ids: S2StageIDs
+    fields: S2BitrixFields
+    status_values: S2StatusValues
+
+    @model_validator(mode="after")
+    def check_distinct_mappings(self) -> Self:
+        for mapping in (self.stage_ids, self.fields, self.status_values):
+            values = [value for value in mapping.model_dump().values() if value is not None]
+            if len(set(values)) != len(values):
+                raise ValueError("S2 Bitrix mappings must be distinct within each group")
+        return self
+
+
+class S2Profile(StrictDTO):
+    extraction: ExtractionProfile
+    min_eligible_quotes: Annotated[int, Field(strict=True, ge=2)]
+    weights: S2Weights
+    max_budget_overrun_pct: DecimalString
+    credit_limit_policy: Literal["REQUIRE_FOR_DEFERRED", "IGNORE"]
+    bitrix24: S2BitrixProfile
+
+    @field_validator("max_budget_overrun_pct")
+    @classmethod
+    def check_budget_percentage(cls, value: str) -> str:
+        if Decimal(value) > Decimal("100.00"):
+            raise ValueError("S2 budget overrun must be at most 100.00 percent")
+        return value
+
+
 class Profile(StrictDTO):
     slug: Nonempty
     revision: Nonempty
@@ -165,6 +234,7 @@ class Profile(StrictDTO):
     stages: dict[Stage, StageProfile]
     escalation_reasons: list[Nonempty] = Field(default_factory=list)
     s1_kyc: S1Profile | None = None
+    s2_tender: S2Profile | None = None
     template: StrictBool = False
 
     @field_validator("timezone")
@@ -202,7 +272,7 @@ class Profile(StrictDTO):
         return self
 
 
-def load_profile(root: Path, slug: str) -> Profile:
+def load_profile(root: Path, slug: str, revision: str | None = None) -> Profile:
     if not re.fullmatch(r"[a-z0-9][a-z0-9_-]{0,63}", slug):
         raise ValueError("Invalid profile slug")
     base = root.resolve()
@@ -211,6 +281,16 @@ def load_profile(root: Path, slug: str) -> Profile:
         raise ValueError("Profile path escapes its root")
     with path.open(encoding="utf-8") as stream:
         profile = Profile.model_validate(yaml.safe_load(stream))
+    if revision is not None and profile.revision != revision:
+        if not re.fullmatch(r"[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}", revision):
+            raise ValueError("Invalid profile revision")
+        archived = (base / slug / f"profile.v{revision}.yaml").resolve()
+        if not archived.is_relative_to(base):
+            raise ValueError("Profile archive escapes its root")
+        with archived.open(encoding="utf-8") as stream:
+            profile = Profile.model_validate(yaml.safe_load(stream))
+        if profile.revision != revision:
+            raise ValueError("Archived profile revision does not match")
     if profile.slug != slug:
         raise ValueError("Profile slug does not match directory")
     return profile

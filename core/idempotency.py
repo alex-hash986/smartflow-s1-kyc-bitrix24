@@ -53,6 +53,15 @@ class TaskCommand(StrictDTO):
     description: str = ""
 
 
+class PublicationDecision(StrictDTO):
+    tenant_id: Nonempty
+    request_id: UUID
+    stage: Stage
+    attempt: PositiveID
+    decision: Literal["approve", "cancel"]
+    evidence_ref: Nonempty
+
+
 class PublicationCommand(StrictDTO):
     key: PublicationKey
     stage_attempt: PositiveID
@@ -66,6 +75,8 @@ class PublicationCommand(StrictDTO):
     task: TaskCommand | None = None
     timeline_comment: Nonempty | None = None
     inn_field: Nonempty | None = None
+    card_external_key: Nonempty | None = None
+    closes_cycle: Literal[True] | None = None
 
 
 class Journal:
@@ -128,6 +139,36 @@ class Journal:
     def _key(key: PublicationKey) -> tuple[str, str, Stage, Purpose]:
         return key.tenant_id, str(key.request_id), key.stage, key.purpose
 
+    def record_decision(self, decision: PublicationDecision) -> None:
+        """Persist an already verified external decision from a trusted adapter."""
+        key = decision.tenant_id, str(decision.request_id), decision.stage
+        with self.db.transaction() as conn:
+            prior = conn.execute(
+                """SELECT decision,evidence_ref FROM publication_decisions
+                   WHERE tenant_id=? AND request_id=? AND stage=? AND attempt=?""",
+                (*key, decision.attempt),
+            ).fetchone()
+            if prior is not None:
+                if tuple(prior) != (decision.decision, decision.evidence_ref):
+                    raise Conflict("Publication decision is immutable")
+                return
+            latest = conn.execute(
+                """SELECT attempt,status FROM transaction_stages
+                   WHERE tenant_id=? AND request_id=? AND stage=? ORDER BY attempt DESC LIMIT 1""",
+                key,
+            ).fetchone()
+            final = conn.execute(
+                """SELECT 1 FROM crm_publications WHERE tenant_id=? AND request_id=?
+                   AND stage=? AND purpose='stage_result'""",
+                key,
+            ).fetchone()
+            if latest is None or tuple(latest) != (decision.attempt, "completed") or final:
+                raise Conflict("Decision requires the latest completed attempt before publication")
+            conn.execute(
+                """INSERT INTO publication_decisions VALUES (?,?,?,?,?,?,?)""",
+                (*key, decision.attempt, decision.decision, decision.evidence_ref, utc_now()),
+            )
+
     def approve(
         self,
         command: PublicationCommand,
@@ -139,7 +180,9 @@ class Journal:
         marker = digest(list(key))
         if command.task_required != (command.task is not None):
             raise Conflict("Task requirement and command must agree")
-        optional = {"timeline_comment", "inn_field"}
+        if command.closes_cycle and (command.card_external_key is None or key[3] != "stage_result"):
+            raise Conflict("Closing a cycle requires an S2 final publication")
+        optional = {"timeline_comment", "inn_field", "card_external_key", "closes_cycle"}
         omitted = {key for key in optional if getattr(command, key) is None}
         serialized = canonical_json(command.model_dump(mode="json", exclude=omitted))
         with self.db.transaction() as conn:
@@ -152,6 +195,43 @@ class Journal:
                 if prior["command_json"] != serialized:
                     raise Conflict("Publication command is immutable")
                 return marker
+            if command.card_external_key is not None:
+                if key[2] != "S2" or command.card_external_key != digest(
+                    [*key[:3], "stage_result"]
+                ):
+                    raise Conflict("Invalid shared card key")
+                latest = conn.execute(
+                    """SELECT MAX(attempt) FROM transaction_stages
+                       WHERE tenant_id=? AND request_id=? AND stage=?""",
+                    key[:3],
+                ).fetchone()[0]
+                if latest != command.stage_attempt:
+                    raise Conflict("S2 publication requires the latest evaluation")
+                if key[3] == "stage_result":
+                    decision = conn.execute(
+                        """SELECT decision,evidence_ref FROM publication_decisions
+                           WHERE tenant_id=? AND request_id=? AND stage=? AND attempt=?""",
+                        (*key[:3], command.stage_attempt),
+                    ).fetchone()
+                    if decision is not None and (
+                        command.approval_ref != decision["evidence_ref"]
+                        or bool(command.closes_cycle) != (decision["decision"] == "cancel")
+                    ):
+                        raise Conflict("Publication does not match the recorded decision")
+                    if decision is None and command.closes_cycle:
+                        raise Conflict("Cancellation requires a recorded decision")
+                counterpart = conn.execute(
+                    """SELECT status,portal_id,entity_type_id FROM crm_publications
+                       WHERE tenant_id=? AND request_id=? AND stage=? AND purpose<>?""",
+                    key,
+                ).fetchone()
+                if counterpart is not None and (
+                    key[3] == "human_review"
+                    or counterpart["status"] != "published"
+                    or counterpart["portal_id"] != command.portal_id
+                    or counterpart["entity_type_id"] != command.entity_type_id
+                ):
+                    raise Conflict("The other S2 publication must be resolved first")
             row = conn.execute(
                 """SELECT response_json FROM transaction_stages
                    WHERE tenant_id=? AND request_id=? AND stage=? AND attempt=?
@@ -164,7 +244,7 @@ class Journal:
             if key[3] == "stage_result" and response.need_human and not human_approved:
                 raise Conflict("This revision requires a human decision")
             if key[3] == "human_review" and (
-                not response.need_human
+                (not response.need_human and not (command.card_external_key and allow_review_card))
                 or (
                     (not command.task_required or command.item_id is None)
                     and not (allow_review_card and command.timeline_comment)
@@ -286,7 +366,14 @@ class Journal:
             if result.rowcount == 1 and key.purpose == "stage_result":
                 cycle_key = self._key(key)[:2]
                 elapsed = None
-                if key.stage == "S3":
+                command_json = conn.execute(
+                    """SELECT command_json FROM crm_publications
+                       WHERE tenant_id=? AND request_id=? AND stage=? AND purpose=?""",
+                    self._key(key),
+                ).fetchone()[0]
+                command = PublicationCommand.model_validate_json(command_json)
+                completed = key.stage == "S3" or bool(command.closes_cycle)
+                if completed:
                     received_at = conn.execute(
                         """SELECT received_at FROM idempotency_records
                            WHERE tenant_id=? AND request_id=?""",
@@ -301,7 +388,13 @@ class Journal:
                 conn.execute(
                     """UPDATE transaction_telemetry SET outcome=?,processing_time_sec=?,
                        updated_at=? WHERE tenant_id=? AND request_id=?""",
-                    ("completed" if key.stage == "S3" else "running", elapsed, now, *cycle_key),
+                    ("completed" if completed else "running", elapsed, now, *cycle_key),
+                )
+            elif result.rowcount == 1 and key.stage == "S2":
+                conn.execute(
+                    """UPDATE transaction_telemetry SET outcome='waiting_human',need_human=1,
+                       updated_at=? WHERE tenant_id=? AND request_id=?""",
+                    (now, *self._key(key)[:2]),
                 )
             return result.rowcount == 1
 

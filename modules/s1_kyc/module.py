@@ -63,6 +63,15 @@ class ParseJournal:
                 return S1ParseReply.model_validate_json(prior["response_json"])
             if (
                 conn.execute(
+                    """SELECT 1 FROM s2_extractions WHERE tenant_id=? AND request_id=?
+                   AND response_json IS NULL""",
+                    key,
+                ).fetchone()
+                is not None
+            ):
+                return "running"
+            if (
+                conn.execute(
                     "SELECT 1 FROM transaction_stages WHERE tenant_id=? AND request_id=?",
                     key,
                 ).fetchone()
@@ -110,7 +119,9 @@ class S1Worker(BaseSmartWorker):
 
     def profile(self, context: S1Context) -> S1Profile:
         try:
-            profile = load_profile(self.profiles_path, context.profile_slug)
+            profile = load_profile(
+                self.profiles_path, context.profile_slug, context.profile_revision
+            )
         except (OSError, ValueError) as exc:
             raise Conflict("S1 profile unavailable") from exc
         if (

@@ -20,6 +20,7 @@ include = ["core", "core.*", "modules", "modules.*"]
 [tool.setuptools.package-data]
 core = ["schema.sql"]
 "modules.s1_kyc" = ["prompts/*.yaml"]
+"modules.s2_tender" = ["prompts/*.yaml"]
 
 [tool.ruff]
 target-version = "py311"

@@ -20,6 +20,19 @@ from core.telemetry import Telemetry
 from modules.s1_kyc.contracts import S1EvaluateCall, S1ParseCall
 from modules.s1_kyc.module import S1ParseReply, S1Worker
 from modules.s1_kyc.publication import S1PublicationRequest, prepare_s1_publication
+from modules.s2_tender.contracts import S2ParseCall
+from modules.s2_tender.extractions import S2ParseReply
+from modules.s2_tender.intake import (
+    S2GateReply,
+    S2GateRequest,
+    TenderIntake,
+    TenderReceipt,
+    confirm_tender_decision,
+    read_s1_gates,
+    register_tender,
+)
+from modules.s2_tender.module import S2Worker
+from modules.s2_tender.publication import S2PublicationRequest, prepare_s2_publication
 
 
 def create_app(
@@ -35,6 +48,9 @@ def create_app(
     llm = gateway if gateway is not None else LLMGateway(settings)
     s1 = S1Worker(settings.profiles_path, llm, db)
     registered.setdefault("S1", s1)
+    s2 = S2Worker(settings.profiles_path, llm, db)
+    if workers is None:
+        registered["S2"] = s2
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
@@ -97,7 +113,7 @@ def create_app(
         if worker is None:
             raise HTTPException(503, "No worker registered for this stage")
         try:
-            if isinstance(worker, S1Worker):
+            if isinstance(worker, (S1Worker, S2Worker)):
                 await asyncio.to_thread(worker.validate_request, envelope)
             else:
                 worker.request_payload.model_validate(envelope.payload)
@@ -105,7 +121,9 @@ def create_app(
             if isinstance(exc, Conflict):
                 raise
             raise HTTPException(422, "Invalid worker input payload") from None
-        attempt = await asyncio.to_thread(telemetry.reserve, envelope)
+        attempt = await asyncio.to_thread(
+            telemetry.reserve, envelope, verify_s2_in_worker=isinstance(worker, S2Worker)
+        )
         if attempt.response is not None:
             return attempt.response
         if attempt.status == "running":
@@ -188,6 +206,51 @@ def create_app(
         if publisher is None:
             raise HTTPException(503, "No publication dispatcher configured")
         return prepare_s1_publication(journal, settings.profiles_path, publisher.portal_id, call)
+
+    @app.post("/s2/intake", dependencies=[Depends(authenticate)])
+    def intake_s2(call: TenderIntake) -> TenderReceipt:
+        if publisher is None:
+            raise HTTPException(503, "No publication dispatcher configured")
+        return register_tender(journal, settings.profiles_path, publisher.portal_id, call)
+
+    @app.post("/s2/supplier-gates", dependencies=[Depends(authenticate)])
+    async def gates_s2(call: S2GateRequest) -> S2GateReply:
+        if publisher is None:
+            raise HTTPException(503, "No publication dispatcher configured")
+        try:
+            return await read_s1_gates(publisher, settings.profiles_path, call)
+        except BitrixError:
+            raise HTTPException(503, "S1 portal read unavailable") from None
+
+    @app.post("/s2/publication/decision", dependencies=[Depends(authenticate)], status_code=204)
+    async def decision_s2(call: S2PublicationRequest) -> None:
+        if publisher is None:
+            raise HTTPException(503, "No publication dispatcher configured")
+        try:
+            await confirm_tender_decision(publisher, settings.profiles_path, call)
+        except BitrixError:
+            raise HTTPException(503, "S2 decision portal read unavailable") from None
+
+    @app.post("/s2/parse", response_model=S2ParseReply, dependencies=[Depends(authenticate)])
+    async def parse_s2(call: S2ParseCall) -> S2ParseReply | JSONResponse:
+        reply = await asyncio.shield(s2.parse(call, settings.max_cycle_cost_rub))
+        if reply == "running":
+            return JSONResponse(
+                {"status": "running"}, status_code=202, headers={"Retry-After": "1"}
+            )
+        return reply
+
+    @app.post(
+        "/s2/evaluate", response_model=WorkerResponseEnvelope, dependencies=[Depends(authenticate)]
+    )
+    async def evaluate_s2(envelope: WorkerRequestEnvelope) -> WorkerResponseEnvelope | JSONResponse:
+        return await run("S2", envelope)
+
+    @app.post("/s2/publication/prepare", dependencies=[Depends(authenticate)])
+    def prepare_s2(call: S2PublicationRequest) -> PublicationKey:
+        if publisher is None:
+            raise HTTPException(503, "No publication dispatcher configured")
+        return prepare_s2_publication(journal, settings.profiles_path, publisher.portal_id, call)
 
     @app.post("/v1/publications/dispatch", dependencies=[Depends(authenticate)])
     async def dispatch(key: PublicationKey) -> dict[str, str | int | None]:

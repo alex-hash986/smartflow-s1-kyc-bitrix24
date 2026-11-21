@@ -62,11 +62,23 @@ class Publisher:
 
     async def _publish(self, key: PublicationKey, token: str, state: PublicationState) -> None:
         command, item_id = state.command, state.item_id
+        card_marker = command.card_external_key or state.marker
         if item_id is None:
             existing = await self._find_item(state) if command.timeline_comment else None
+            if command.card_external_key is not None and key.purpose == "stage_result":
+                with self.journal.db.connect() as conn:
+                    review = conn.execute(
+                        """SELECT item_id FROM crm_publications WHERE tenant_id=? AND request_id=?
+                           AND stage=? AND purpose='human_review' AND status='published'""",
+                        (key.tenant_id, str(key.request_id), key.stage),
+                    ).fetchone()
+                if review is not None and (
+                    existing is None or str(existing.get("id")) != str(review["item_id"])
+                ):
+                    raise Conflict("The confirmed S2 review card could not be found")
             if not await asyncio.to_thread(self.journal.begin_step, key, token, "item"):
                 raise Conflict("Publication item step is not available")
-            fields = {**command.fields, command.external_key_field: state.marker}
+            fields = {**command.fields, command.external_key_field: card_marker}
             if existing is None:
                 item_id = await self.client.item_add(command.entity_type_id, fields)
             else:
@@ -82,7 +94,7 @@ class Publisher:
             if not await asyncio.to_thread(self.journal.record_step, key, token, "item", item_id):
                 raise Conflict("Publication item ownership changed")
         item = await self.client.item_get(command.entity_type_id, item_id)
-        if command.item_id is None and item.get(command.external_key_field) != state.marker:
+        if command.item_id is None and item.get(command.external_key_field) != card_marker:
             raise Conflict("CRM item marker could not be verified")
         if command.timeline_comment and not self._matches(item, command.fields):
             raise Conflict("CRM publication fields could not be verified")
@@ -130,16 +142,17 @@ class Publisher:
 
     async def _find_item(self, state: PublicationState) -> JSONObject | None:
         command = state.command
+        card_marker = command.card_external_key or state.marker
         matches: list[JSONObject] = []
         start = 0
         while True:
             page = await self.client.item_list(
                 command.entity_type_id,
-                {"=" + command.external_key_field: state.marker},
+                {"=" + command.external_key_field: card_marker},
                 start=start,
             )
             matches.extend(
-                item for item in page.items if item.get(command.external_key_field) == state.marker
+                item for item in page.items if item.get(command.external_key_field) == card_marker
             )
             if page.next_start is None:
                 break
@@ -151,7 +164,7 @@ class Publisher:
         if not matches:
             return None
         match = await self.client.item_get(command.entity_type_id, int(str(matches[0]["id"])))
-        if match.get(command.external_key_field) != state.marker:
+        if match.get(command.external_key_field) != card_marker:
             raise Conflict("CRM marker changed during lookup")
         if (
             command.inn_field is not None
@@ -164,6 +177,8 @@ class Publisher:
     @staticmethod
     def _matches(item: JSONObject, fields: JSONObject) -> bool:
         return all(
-            item.get(key) == expected or (type(expected) is int and item.get(key) == str(expected))
+            item.get(key) == expected
+            or (expected is None and item.get(key) == "")
+            or (type(expected) is int and item.get(key) == str(expected))
             for key, expected in fields.items()
         )

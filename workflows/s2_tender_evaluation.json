@@ -1,0 +1,907 @@
+{
+  "id": "SmartflowS2Tender",
+  "name": "S2 Tender Evaluation",
+  "nodes": [
+    {
+      "id": "d31a2203-0000-4000-8000-000000000001",
+      "name": "Tender webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "s2-tender-evaluation",
+        "authentication": "headerAuth",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "webhookId": "d31a2203-0000-4000-8000-000000000300"
+    },
+    {
+      "id": "d31a2203-0000-4000-8000-000000000002",
+      "name": "Normalize tender",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        240,
+        0
+      ],
+      "parameters": {
+        "jsCode": "const body = $input.first().json.body ?? {};\nconst {delivery_key, upstream_s1_item_id, quotes, items, target_budget_rub, required_deferment_days} = body;\nif (typeof delivery_key !== 'string' || !delivery_key.trim() || !Number.isSafeInteger(upstream_s1_item_id) || upstream_s1_item_id < 1 ||\n    !Array.isArray(quotes) || !quotes.length || !Array.isArray(items) || !items.length ||\n    typeof target_budget_rub !== 'string' || !Number.isSafeInteger(required_deferment_days) || required_deferment_days < 0) {\n  return [{json:{statusCode:422,body:{detail:'Invalid tender application'}}}];\n}\nreturn [{json:{statusCode:200,body:{profile_slug:'portal_b24_b2b',delivery_key:delivery_key.trim(),\n  upstream_s1_item_id,quotes,items,target_budget_rub,required_deferment_days}}}];"
+      }
+    },
+    {
+      "id": "d31a2203-0000-4000-8000-000000000003",
+      "name": "Tender valid",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        480,
+        0
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "d31a2203-0000-4000-8000-000000000202",
+              "leftValue": "={{ $json.statusCode === 200 }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "d31a2203-0000-4000-8000-000000000004",
+      "name": "Register S2 delivery",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        720,
+        0
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "http://host.docker.internal:8021/s2/intake",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.body }}",
+        "options": {
+          "timeout": 120000,
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "d31a2203-0000-4000-8000-000000000005",
+      "name": "Tender registered",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        960,
+        0
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "d31a2203-0000-4000-8000-000000000204",
+              "leftValue": "={{ $json.statusCode === 200 }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "d31a2203-0000-4000-8000-000000000006",
+      "name": "Read current S1 cards",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1200,
+        0
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "http://host.docker.internal:8021/s2/supplier-gates",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ (() => { const r = $('Register S2 delivery').first().json.body; const t = $('Normalize tender').first().json.body; return {tenant_id:r.tenant_id, request_id:r.request_id, profile_slug:r.profile_slug, profile_revision:r.profile_revision,upstream_item:r.upstream_item,suppliers:t.quotes.map(q => ({supplier_inn:q.supplier_inn,s1_item_id:q.s1_item_id}))}; })() }}",
+        "options": {
+          "timeout": 120000,
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "d31a2203-0000-4000-8000-000000000007",
+      "name": "S1 cards checked",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1440,
+        0
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "d31a2203-0000-4000-8000-000000000206",
+              "leftValue": "={{ $json.statusCode === 200 }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "d31a2203-0000-4000-8000-000000000008",
+      "name": "Parse quotes",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1680,
+        0
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "http://host.docker.internal:8021/s2/parse",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ (() => { const r = $('Register S2 delivery').first().json.body; const t = $('Normalize tender').first().json.body; return {tenant_id:r.tenant_id, request_id:r.request_id, profile_slug:r.profile_slug, profile_revision:r.profile_revision,payload:{quotes:t.quotes} }; })() }}",
+        "options": {
+          "timeout": 120000,
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "d31a2203-0000-4000-8000-000000000009",
+      "name": "Quotes parsed",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1920,
+        0
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "d31a2203-0000-4000-8000-000000000208",
+              "leftValue": "={{ $json.statusCode === 200 }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "d31a2203-0000-4000-8000-000000000010",
+      "name": "Evaluate tender",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2160,
+        0
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "http://host.docker.internal:8021/s2/evaluate",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ (() => { const r = $('Register S2 delivery').first().json.body; const t = $('Normalize tender').first().json.body; return {tenant_id:r.tenant_id, request_id:r.request_id, profile_slug:r.profile_slug, profile_revision:r.profile_revision,schema_version:'1',stage:'S2',attempt:r.attempt,received_at:r.received_at,upstream_item:r.upstream_item,payload:{items:t.items,target_budget_rub:t.target_budget_rub,required_deferment_days:t.required_deferment_days,quotes:$json.body.payload.quotes,supplier_gate_snapshots:$('Read current S1 cards').first().json.body.supplier_gate_snapshots} }; })() }}",
+        "options": {
+          "timeout": 120000,
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "d31a2203-0000-4000-8000-000000000011",
+      "name": "Tender evaluated",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        2400,
+        0
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "d31a2203-0000-4000-8000-000000000210",
+              "leftValue": "={{ $json.statusCode === 200 }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "d31a2203-0000-4000-8000-000000000012",
+      "name": "Build evaluation publication",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2640,
+        0
+      ],
+      "parameters": {
+        "jsCode": "const r = $('Register S2 delivery').first().json.body;\nreturn [{json:{body:{tenant_id:r.tenant_id, request_id:r.request_id, profile_slug:r.profile_slug, profile_revision:r.profile_revision,attempt:r.attempt}}}];"
+      }
+    },
+    {
+      "id": "d31a2203-0000-4000-8000-000000000013",
+      "name": "Decision webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        -500
+      ],
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "s2-tender-decision",
+        "authentication": "headerAuth",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "webhookId": "d31a2203-0000-4000-8000-000000000312"
+    },
+    {
+      "id": "d31a2203-0000-4000-8000-000000000014",
+      "name": "Normalize decision notice",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        240,
+        -500
+      ],
+      "parameters": {
+        "jsCode": "const {request_id,attempt} = $input.first().json.body ?? {};\nif (typeof request_id !== 'string' || !/^[0-9a-f-]{36}$/i.test(request_id) || !Number.isSafeInteger(attempt) || attempt < 1) {\n  return [{json:{statusCode:422,body:{detail:'Invalid tender decision notice'}}}];\n}\nreturn [{json:{statusCode:200,body:{tenant_id:'portal_b24_b2b',profile_slug:'portal_b24_b2b',profile_revision:'4',request_id,attempt}}}];"
+      }
+    },
+    {
+      "id": "d31a2203-0000-4000-8000-000000000015",
+      "name": "Decision notice valid",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        480,
+        -500
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "d31a2203-0000-4000-8000-000000000214",
+              "leftValue": "={{ $json.statusCode === 200 }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "d31a2203-0000-4000-8000-000000000016",
+      "name": "Verify decision in Bitrix24",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        720,
+        -500
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "http://host.docker.internal:8021/s2/publication/decision",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.body }}",
+        "options": {
+          "timeout": 120000,
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "d31a2203-0000-4000-8000-000000000017",
+      "name": "Portal decision confirmed",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        960,
+        -500
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "d31a2203-0000-4000-8000-000000000216",
+              "leftValue": "={{ $json.statusCode === 204 }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "d31a2203-0000-4000-8000-000000000018",
+      "name": "Build decision publication",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1200,
+        -500
+      ],
+      "parameters": {
+        "jsCode": "return [{json:{body:$('Normalize decision notice').first().json.body}}];"
+      }
+    },
+    {
+      "id": "d31a2203-0000-4000-8000-000000000019",
+      "name": "Prepare publication",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2880,
+        -160
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "http://host.docker.internal:8021/s2/publication/prepare",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.body }}",
+        "options": {
+          "timeout": 120000,
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "d31a2203-0000-4000-8000-000000000020",
+      "name": "Publication prepared",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        3120,
+        -160
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "d31a2203-0000-4000-8000-000000000219",
+              "leftValue": "={{ $json.statusCode === 200 }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "d31a2203-0000-4000-8000-000000000021",
+      "name": "Dispatch publication",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        3360,
+        -160
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "http://host.docker.internal:8021/v1/publications/dispatch",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.body }}",
+        "options": {
+          "timeout": 120000,
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "d31a2203-0000-4000-8000-000000000022",
+      "name": "Safe response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3600,
+        360
+      ],
+      "parameters": {
+        "jsCode": "const result = $input.first().json;\nconst status = result.statusCode;\nif (status === 200 && typeof result.body?.status === 'string') {\n  const {status: publication_status, item_id, comment_id} = result.body;\n  const code = publication_status === 'published' ? 200 : (publication_status === 'reconcile' ? 409 : 202);\n  const source = $('Build decision publication').isExecuted ? $('Build decision publication') : $('Build evaluation publication');\n  const {request_id, attempt} = source.first().json.body;\n  return [{json:{statusCode:code,body:{publication_status,item_id,comment_id,request_id,attempt}}}];\n}\nconst messages = {202:'Processing in progress; retry the same delivery',401:'Kernel authentication failed',409:'Tender state or portal decision could not be confirmed',422:'Invalid tender payload',503:'Kernel or portal temporarily unavailable'};\nreturn [{json:{statusCode:Object.hasOwn(messages,status) ? status : 502, body:{detail:messages[status] ?? 'Tender workflow request failed'}}}];"
+      }
+    },
+    {
+      "id": "d31a2203-0000-4000-8000-000000000023",
+      "name": "Respond",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.4,
+      "position": [
+        3840,
+        360
+      ],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ $json.body }}",
+        "options": {
+          "responseCode": "={{ $json.statusCode }}",
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Cache-Control",
+                "value": "no-store"
+              }
+            ]
+          }
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Tender valid": {
+      "main": [
+        [
+          {
+            "node": "Register S2 delivery",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Safe response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Tender registered": {
+      "main": [
+        [
+          {
+            "node": "Read current S1 cards",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Safe response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "S1 cards checked": {
+      "main": [
+        [
+          {
+            "node": "Parse quotes",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Safe response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Quotes parsed": {
+      "main": [
+        [
+          {
+            "node": "Evaluate tender",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Safe response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Tender evaluated": {
+      "main": [
+        [
+          {
+            "node": "Build evaluation publication",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Safe response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Decision notice valid": {
+      "main": [
+        [
+          {
+            "node": "Verify decision in Bitrix24",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Safe response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Portal decision confirmed": {
+      "main": [
+        [
+          {
+            "node": "Build decision publication",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Safe response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Publication prepared": {
+      "main": [
+        [
+          {
+            "node": "Dispatch publication",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Safe response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Tender webhook": {
+      "main": [
+        [
+          {
+            "node": "Normalize tender",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize tender": {
+      "main": [
+        [
+          {
+            "node": "Tender valid",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Register S2 delivery": {
+      "main": [
+        [
+          {
+            "node": "Tender registered",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read current S1 cards": {
+      "main": [
+        [
+          {
+            "node": "S1 cards checked",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse quotes": {
+      "main": [
+        [
+          {
+            "node": "Quotes parsed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Evaluate tender": {
+      "main": [
+        [
+          {
+            "node": "Tender evaluated",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build evaluation publication": {
+      "main": [
+        [
+          {
+            "node": "Prepare publication",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Decision webhook": {
+      "main": [
+        [
+          {
+            "node": "Normalize decision notice",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize decision notice": {
+      "main": [
+        [
+          {
+            "node": "Decision notice valid",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Verify decision in Bitrix24": {
+      "main": [
+        [
+          {
+            "node": "Portal decision confirmed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build decision publication": {
+      "main": [
+        [
+          {
+            "node": "Prepare publication",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare publication": {
+      "main": [
+        [
+          {
+            "node": "Publication prepared",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Dispatch publication": {
+      "main": [
+        [
+          {
+            "node": "Safe response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Safe response": {
+      "main": [
+        [
+          {
+            "node": "Respond",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "saveDataSuccessExecution": "none",
+    "saveDataErrorExecution": "none",
+    "saveManualExecutions": false,
+    "saveExecutionProgress": false
+  }
+}

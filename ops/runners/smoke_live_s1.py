@@ -73,6 +73,8 @@ async def scenario(
     cfg: Settings,
     batch: str,
     red: bool,
+    fixture_index: int | None = None,
+    standalone: bool = True,
 ) -> JSONObject:
     start = perf_counter()
     profile = load_profile(cfg.profiles_path, SLUG)
@@ -84,7 +86,9 @@ async def scenario(
     mapping = profile.s1_kyc.bitrix24
     label = "B" if red else "A"
     case = Case(id=label, scenario="red" if red else "green")
-    application = source(case, 94021 if red else 94020)
+    application = source(
+        case, fixture_index if fixture_index is not None else (94021 if red else 94020)
+    )
     delivery: JSONObject = {
         "tenant_id": profile.tenant_id,
         "source": "s1-live-smoke",
@@ -198,39 +202,41 @@ async def scenario(
             item.get(mapping.fields[name] or "") in (None, "", 0, "0")
             for name in ("KYC_STATUS", "APPROVED_CREDIT_LIMIT_RUB")
         )
-    gate = WorkerRequestEnvelope.model_validate(
-        {
-            **context,
-            "schema_version": "1",
-            "stage": "S2",
-            "attempt": 1,
-            "payload": {},
-            "upstream_item": {"entity_type_id": entity, "item_id": item_id},
-        }
-    )
-    # Roll back the readiness probe: S2 is not executed or reserved on the pilot database.
-    probe_db = Database(cfg.sqlite_path.with_name(f"gate-{label}.sqlite3"))
-    with publisher.journal.db.connect() as original, probe_db.connect() as clone:
-        original.backup(clone)
-    allowed = False
-    try:
-        allowed = Telemetry(probe_db).reserve(gate).status == "reserved"
-    except Conflict:
-        if not red:
-            raise
-    assert allowed is not red
-    if allowed:
-        assert str(item[mapping.fields["KYC_STATUS"] or ""]) == str(
-            mapping.kyc_status_values["APPROVED"],
+    allowed = not red
+    if standalone:
+        gate = WorkerRequestEnvelope.model_validate(
+            {
+                **context,
+                "schema_version": "1",
+                "stage": "S2",
+                "attempt": 1,
+                "payload": {},
+                "upstream_item": {"entity_type_id": entity, "item_id": item_id},
+            }
         )
-    Telemetry(publisher.journal.db).record_cycle(
-        profile.tenant_id,
-        UUID(str(context["request_id"])),
-        outcome="waiting_human" if red else "completed",
-        processing_time_sec=perf_counter() - start,
-        saved_minutes=None,
-        ab_variant=None,
-    )
+        # Roll back the readiness probe: S2 is not executed or reserved on the pilot database.
+        probe_db = Database(cfg.sqlite_path.with_name(f"gate-{label}.sqlite3"))
+        with publisher.journal.db.connect() as original, probe_db.connect() as clone:
+            original.backup(clone)
+        allowed = False
+        try:
+            allowed = Telemetry(probe_db).reserve(gate).status == "reserved"
+        except Conflict:
+            if not red:
+                raise
+        assert allowed is not red
+        if allowed:
+            assert str(item[mapping.fields["KYC_STATUS"] or ""]) == str(
+                mapping.kyc_status_values["APPROVED"],
+            )
+        Telemetry(publisher.journal.db).record_cycle(
+            profile.tenant_id,
+            UUID(str(context["request_id"])),
+            outcome="waiting_human" if red else "completed",
+            processing_time_sec=perf_counter() - start,
+            saved_minutes=None,
+            ab_variant=None,
+        )
     return {
         "scenario": label,
         "item_id": item_id,

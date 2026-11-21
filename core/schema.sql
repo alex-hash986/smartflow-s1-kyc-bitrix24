@@ -109,6 +109,46 @@ CREATE TABLE IF NOT EXISTS s1_extractions (
     FOREIGN KEY (tenant_id, request_id) REFERENCES idempotency_records (tenant_id, request_id)
 ) STRICT;
 
+CREATE TABLE IF NOT EXISTS s2_extractions (
+    tenant_id TEXT NOT NULL,
+    request_id TEXT NOT NULL,
+    quote_id TEXT NOT NULL,
+    input_sha256 TEXT NOT NULL CHECK (length(input_sha256) = 64),
+    started_at TEXT NOT NULL,
+    finished_at TEXT,
+    response_json TEXT,
+    mode TEXT CHECK (mode IN ('llm', 'deterministic', 'fallback')),
+    fallback_reason TEXT,
+    tokens_in INTEGER CHECK (tokens_in >= 0),
+    tokens_out INTEGER CHECK (tokens_out >= 0),
+    cost_rub_e8 INTEGER CHECK (cost_rub_e8 >= 0),
+    PRIMARY KEY (tenant_id, request_id, quote_id),
+    FOREIGN KEY (tenant_id, request_id) REFERENCES idempotency_records (tenant_id, request_id)
+) STRICT;
+
+CREATE TABLE IF NOT EXISTS s2_intakes (
+    tenant_id TEXT NOT NULL,
+    request_id TEXT NOT NULL,
+    delivery_key TEXT NOT NULL,
+    input_sha256 TEXT NOT NULL CHECK (length(input_sha256) = 64),
+    PRIMARY KEY (tenant_id, request_id),
+    UNIQUE (tenant_id, delivery_key),
+    FOREIGN KEY (tenant_id, request_id) REFERENCES idempotency_records (tenant_id, request_id)
+) STRICT;
+
+CREATE TABLE IF NOT EXISTS publication_decisions (
+    tenant_id TEXT NOT NULL,
+    request_id TEXT NOT NULL,
+    stage TEXT NOT NULL,
+    attempt INTEGER NOT NULL,
+    decision TEXT NOT NULL CHECK (decision IN ('approve', 'cancel')),
+    evidence_ref TEXT NOT NULL,
+    decided_at TEXT NOT NULL,
+    PRIMARY KEY (tenant_id, request_id, stage, attempt),
+    FOREIGN KEY (tenant_id, request_id, stage, attempt)
+        REFERENCES transaction_stages (tenant_id, request_id, stage, attempt)
+) STRICT;
+
 CREATE TABLE IF NOT EXISTS crm_publication_comments (
     tenant_id TEXT NOT NULL,
     request_id TEXT NOT NULL,

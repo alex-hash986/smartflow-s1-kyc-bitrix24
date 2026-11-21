@@ -84,7 +84,7 @@ def prepare_s1_publication(
     call: S1PublicationRequest,
 ) -> PublicationKey:
     try:
-        profile = load_profile(profiles_path, call.profile_slug)
+        profile = load_profile(profiles_path, call.profile_slug, call.profile_revision)
     except (ValueError, OSError) as exc:
         raise Conflict("S1 publication profile unavailable") from exc
     stage = profile.stages.get("S1")

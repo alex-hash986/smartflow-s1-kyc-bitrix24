@@ -15,7 +15,7 @@ from core.contracts import (
     cost_atoms,
 )
 from core.database import Database, digest, utc_now
-from core.idempotency import Conflict
+from core.idempotency import Conflict, PublicationCommand
 
 PREVIOUS_STAGE: dict[Stage, Stage] = {"S2": "S1", "S3": "S2"}
 
@@ -34,7 +34,9 @@ class Telemetry:
     def __init__(self, db: Database) -> None:
         self.db = db
 
-    def reserve(self, request: WorkerRequestEnvelope) -> Attempt:
+    def reserve(
+        self, request: WorkerRequestEnvelope, *, verify_s2_in_worker: bool = False
+    ) -> Attempt:
         key = identity(request)
         fingerprint = digest(request.model_dump(mode="json"))
         with self.db.transaction() as conn:
@@ -63,9 +65,9 @@ class Telemetry:
                 if existing["status"] == "running":
                     return Attempt("running")
                 raise Conflict("Attempt is closed")
-            if request.upstream_item is not None:
+            if request.upstream_item is not None and not verify_s2_in_worker:
                 upstream = conn.execute(
-                    """SELECT 1 FROM crm_publications WHERE tenant_id=? AND request_id=?
+                    """SELECT command_json FROM crm_publications WHERE tenant_id=? AND request_id=?
                        AND stage=? AND purpose='stage_result' AND status='published'
                        AND entity_type_id=? AND item_id=?""",
                     (
@@ -75,8 +77,11 @@ class Telemetry:
                         request.upstream_item.item_id,
                     ),
                 ).fetchone()
-                if upstream is None:
-                    raise Conflict("Upstream publication is unconfirmed")
+                if (
+                    upstream is None
+                    or PublicationCommand.model_validate_json(upstream["command_json"]).closes_cycle
+                ):
+                    raise Conflict("Upstream publication is unconfirmed or closed")
             if (
                 request.stage == "S1"
                 and conn.execute(
@@ -87,14 +92,40 @@ class Telemetry:
                 is not None
             ):
                 raise Conflict("S1 extraction is pending")
+            if (verify_s2_in_worker or request.stage == "S1") and conn.execute(
+                """SELECT 1 FROM s2_extractions WHERE tenant_id=? AND request_id=?
+                   AND response_json IS NULL""",
+                key[:2],
+            ).fetchone() is not None:
+                return Attempt("running")
             previous = conn.execute(
-                """SELECT attempt,status FROM transaction_stages WHERE tenant_id=?
+                """SELECT attempt,status,response_json FROM transaction_stages WHERE tenant_id=?
                    AND request_id=? AND stage=? ORDER BY attempt DESC LIMIT 1""",
                 key,
             ).fetchone()
             expected = 1 if previous is None else previous["attempt"] + 1
+            retry_review = (
+                verify_s2_in_worker
+                and previous is not None
+                and previous["status"] == "completed"
+                and WorkerResponseEnvelope.model_validate_json(previous["response_json"]).need_human
+                and conn.execute(
+                    """SELECT 1 FROM crm_publications WHERE tenant_id=? AND request_id=?
+                       AND stage='S2' AND purpose='stage_result'""",
+                    key[:2],
+                ).fetchone()
+                is None
+                and conn.execute(
+                    """SELECT 1 FROM publication_decisions WHERE tenant_id=? AND request_id=?
+                       AND stage='S2' AND attempt=?""",
+                    (*key[:2], previous["attempt"]),
+                ).fetchone()
+                is None
+            )
             if request.attempt != expected or (
-                previous is not None and previous["status"] in ("running", "completed")
+                previous is not None
+                and previous["status"] in ("running", "completed")
+                and not retry_review
             ):
                 raise Conflict("Attempt number is unavailable")
             conn.execute(
@@ -187,9 +218,16 @@ class Telemetry:
         cls,
         conn: sqlite3.Connection,
         key: tuple[str, str],
-        need_human: bool,
+        need_human: bool | None,
     ) -> None:
-        cls._rollup(conn, key, "waiting_human" if need_human else "running", need_human)
+        if need_human is None:
+            row = conn.execute(
+                """SELECT outcome FROM transaction_telemetry WHERE tenant_id=? AND request_id=?""",
+                key,
+            ).fetchone()
+            cls._rollup(conn, key, row["outcome"], None)
+        else:
+            cls._rollup(conn, key, "waiting_human" if need_human else "running", need_human)
 
     @staticmethod
     def _rollup(
@@ -204,8 +242,11 @@ class Telemetry:
                UNION ALL
                SELECT tokens_in,tokens_out,cost_rub_e8,mode,fallback_reason,finished_at,
                       'S1',0 FROM s1_extractions WHERE tenant_id=? AND request_id=?
+               UNION ALL
+               SELECT tokens_in,tokens_out,cost_rub_e8,mode,fallback_reason,finished_at,
+                      'S2',0 FROM s2_extractions WHERE tenant_id=? AND request_id=?
                ORDER BY finished_at, stage, attempt""",
-            (*key, *key),
+            (*key, *key, *key),
         ).fetchall()
         totals = []
         for field in ("tokens_in", "tokens_out", "cost_rub_e8"):
@@ -233,15 +274,20 @@ class Telemetry:
             (*totals, mode, reason, outcome, need_human, utc_now(), *key),
         )
 
-    def remaining_budget(self, tenant_id: str, request_id: UUID, limit: Decimal) -> Decimal:
+    def remaining_budget(
+        self, tenant_id: str, request_id: UUID, limit: Decimal, *, ignore_pending_s2: bool = False
+    ) -> Decimal:
         with self.db.connect() as conn:
             rows = conn.execute(
                 """SELECT cost_rub_e8 FROM transaction_stages
                    WHERE tenant_id=? AND request_id=? AND status<>'running'
                    UNION ALL
                    SELECT cost_rub_e8 FROM s1_extractions
-                   WHERE tenant_id=? AND request_id=?""",
-                (tenant_id, str(request_id), tenant_id, str(request_id)),
+                   WHERE tenant_id=? AND request_id=?
+                   UNION ALL
+                   SELECT cost_rub_e8 FROM s2_extractions
+                   WHERE tenant_id=? AND request_id=? AND (NOT ? OR response_json IS NOT NULL)""",
+                (tenant_id, str(request_id)) * 3 + (ignore_pending_s2,),
             ).fetchall()
         if any(row[0] is None for row in rows):
             return Decimal(0)

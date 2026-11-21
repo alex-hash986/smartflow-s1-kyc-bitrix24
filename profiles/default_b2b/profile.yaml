@@ -58,3 +58,37 @@ s1_kyc:
     kyc_status_values:
       APPROVED: null
       REJECTED: null
+
+
+# S2.1 design parameters. Activate with a new profile revision.
+s2_tender:
+  extraction:
+    max_text_chars: 50000
+    max_pdf_bytes: 10485760
+  min_eligible_quotes: 2
+  weights:
+    price: '50.00'
+    delivery: '20.00'
+    s1_reliability: '20.00'
+    deferment: '10.00'
+  max_budget_overrun_pct: '5.00'
+  credit_limit_policy: REQUIRE_FOR_DEFERRED
+  bitrix24:
+    entity_type_id: null
+    category_id: null
+    responsible_id: null
+    stage_ids:
+      awarded: null
+      review: null
+      cancelled: null
+    fields:
+      TENDER_STATUS: null
+      WINNER_INN: null
+      WINNER_S1_ITEM_ID: null
+      TOTAL_AMOUNT_RUB: null
+      SAVINGS_RUB: null
+      EXTERNAL_KEY: null
+    status_values:
+      AWARDED: null
+      REVIEW_REQUIRED: null
+      CANCELLED: null
