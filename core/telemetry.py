@@ -1,5 +1,6 @@
 import json
 import sqlite3
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
 from decimal import Decimal
@@ -35,7 +36,11 @@ class Telemetry:
         self.db = db
 
     def reserve(
-        self, request: WorkerRequestEnvelope, *, verify_s2_in_worker: bool = False
+        self,
+        request: WorkerRequestEnvelope,
+        *,
+        verify_s2_in_worker: bool = False,
+        pin_attempt: Callable[[sqlite3.Connection], None] | None = None,
     ) -> Attempt:
         key = identity(request)
         fingerprint = digest(request.model_dump(mode="json"))
@@ -122,10 +127,20 @@ class Telemetry:
                 ).fetchone()
                 is None
             )
+            retry_s3 = (
+                request.stage == "S3"
+                and pin_attempt is not None
+                and conn.execute(
+                    """SELECT 1 FROM crm_publications WHERE tenant_id=? AND request_id=?
+                   AND stage='S3' AND (purpose='stage_result' OR status IN ('publishing','reconcile'))""",
+                    key[:2],
+                ).fetchone()
+                is None
+            )
             if request.attempt != expected or (
                 previous is not None
                 and previous["status"] in ("running", "completed")
-                and not retry_review
+                and not (retry_review or (retry_s3 and previous["status"] == "completed"))
             ):
                 raise Conflict("Attempt number is unavailable")
             conn.execute(
@@ -134,6 +149,8 @@ class Telemetry:
                    VALUES (?,?,?,?,'running',?,?)""",
                 (*key, request.attempt, fingerprint, utc_now()),
             )
+            if pin_attempt is not None:
+                pin_attempt(conn)
         return Attempt("reserved")
 
     def complete(
@@ -245,8 +262,11 @@ class Telemetry:
                UNION ALL
                SELECT tokens_in,tokens_out,cost_rub_e8,mode,fallback_reason,finished_at,
                       'S2',0 FROM s2_extractions WHERE tenant_id=? AND request_id=?
+               UNION ALL
+               SELECT tokens_in,tokens_out,cost_rub_e8,mode,fallback_reason,finished_at,
+                      'S3',0 FROM s3_extractions WHERE tenant_id=? AND request_id=?
                ORDER BY finished_at, stage, attempt""",
-            (*key, *key, *key),
+            (*key, *key, *key, *key),
         ).fetchall()
         totals = []
         for field in ("tokens_in", "tokens_out", "cost_rub_e8"):
@@ -275,7 +295,13 @@ class Telemetry:
         )
 
     def remaining_budget(
-        self, tenant_id: str, request_id: UUID, limit: Decimal, *, ignore_pending_s2: bool = False
+        self,
+        tenant_id: str,
+        request_id: UUID,
+        limit: Decimal,
+        *,
+        ignore_pending_s2: bool = False,
+        ignore_pending_s3: bool = False,
     ) -> Decimal:
         with self.db.connect() as conn:
             rows = conn.execute(
@@ -286,8 +312,12 @@ class Telemetry:
                    WHERE tenant_id=? AND request_id=?
                    UNION ALL
                    SELECT cost_rub_e8 FROM s2_extractions
+                   WHERE tenant_id=? AND request_id=? AND (NOT ? OR response_json IS NOT NULL)
+                   UNION ALL
+                   SELECT cost_rub_e8 FROM s3_extractions
                    WHERE tenant_id=? AND request_id=? AND (NOT ? OR response_json IS NOT NULL)""",
-                (tenant_id, str(request_id)) * 3 + (ignore_pending_s2,),
+                (tenant_id, str(request_id)) * 3
+                + (ignore_pending_s2, tenant_id, str(request_id), ignore_pending_s3),
             ).fetchall()
         if any(row[0] is None for row in rows):
             return Decimal(0)

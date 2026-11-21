@@ -1,0 +1,138 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>S3 · Приёмка и рекламации</title>
+<style>
+:root{color-scheme:dark;--bg:#0b1519;--panel:#12232a;--ink:#eef8f6;--muted:#a9bfc2;--line:#2b4248;--mint:#6ef3c2;--orange:#ffb77b}
+*{box-sizing:border-box}html{scroll-behavior:smooth}body{margin:0;background:var(--bg);color:var(--ink);font:1rem/1.6 "Segoe UI",system-ui,sans-serif}a{color:var(--mint)}header,main,footer{width:min(1120px,calc(100% - 36px));margin:auto}nav{display:flex;justify-content:space-between;align-items:center;gap:16px;border-bottom:1px solid var(--line);padding:20px 0}nav div{display:flex;gap:20px;flex-wrap:wrap}nav a{font-weight:600;text-decoration:none}.hero{padding:clamp(48px,9vw,110px) 0 42px;background:radial-gradient(ellipse at 85% 0%,#1c3c3a,transparent 55%)}h1,h2,h3,p{margin-top:0}h1{font-size:clamp(2.7rem,7.5vw,6rem);letter-spacing:-.075em;line-height:1;max-width:900px;margin-bottom:24px}h2{font-size:clamp(1.85rem,4.5vw,3rem);letter-spacing:-.045em;line-height:1.12;margin-bottom:24px}.lede{color:var(--muted);font-size:1.16rem;max-width:690px}.eyebrow{font-size:.88rem;color:var(--mint);font-weight:700;letter-spacing:.08em}.kpis,.flow,.cards,.calc{display:grid;gap:14px}.kpis{grid-template-columns:repeat(3,1fr)}.kpi,.card,.out{border:1px solid var(--line);border-radius:16px;background:var(--panel);padding:22px}.kpi strong,.out strong{display:block;color:var(--mint);font-size:clamp(1.7rem,4.1vw,2.8rem);line-height:1.08;letter-spacing:-.04em}.kpi span,small,.muted{color:var(--muted)}section{padding:48px 0;border-top:1px solid var(--line)}.flow{grid-template-columns:repeat(4,1fr);padding:0;list-style:none}.flow li{border:1px solid var(--line);border-radius:12px;padding:16px;border-top:3px solid var(--mint)}.flow strong{display:block;margin-bottom:4px}.flow span{color:var(--muted)}.table-wrap{overflow-x:auto}.metric{border-collapse:collapse;width:100%;min-width:500px}th,td{text-align:left;border-bottom:1px solid var(--line);padding:12px 14px}th{color:var(--mint)}.cards,.calc{grid-template-columns:1fr 1fr}.review{border-color:#80583e}.review h3{color:var(--orange)}details{border:1px solid var(--line);padding:14px 18px;border-radius:12px;margin-top:18px}summary{cursor:pointer;font-weight:650}pre{white-space:pre-wrap;overflow-wrap:anywhere;background:var(--bg);border-radius:10px;padding:16px;font: .9rem/1.5 ui-monospace,Consolas,monospace}.inputs{display:grid;grid-template-columns:1fr 1fr;gap:12px}label{display:grid;gap:4px;color:var(--muted);font-size:.9rem}input,select{width:100%;font:inherit;color:var(--ink);background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:9px}.out p{margin:0 0 16px}.out p:last-child{margin-bottom:0}.out strong{margin-top:6px}.calc small{display:block;margin-top:12px}footer{padding:25px 0 44px;color:var(--muted);border-top:1px solid var(--line)}:focus-visible{outline:2px solid var(--mint);outline-offset:4px}
+@media(max-width:730px){.flow{grid-template-columns:1fr 1fr}.cards,.calc{grid-template-columns:1fr}.kpi,.card{padding:13px}nav{align-items:flex-start}.kpi span{font-size:.9rem}}@media(max-width:380px){.kpis{grid-template-columns:1fr}}
+</style>
+<style>
+.inputs{align-content:start}.metric{min-width:460px}.metric td{white-space:nowrap}.card, .calc>*{min-width:0}
+@media(max-width:520px){nav{flex-direction:column}nav div{gap:10px 16px}.kpis{grid-template-columns:1fr}section{padding:32px 0}}
+</style>
+</head>
+<body>
+<header><nav aria-label="Разделы"><strong>SMARTFLOW / S3</strong><div>
+<a href="#benchmark">Benchmark</a><a href="#portal">Акты сверки</a><a href="#economics">Калькулятор</a>
+<a href="index.html">Кейс S1</a><a href="s2.html">Кейс S2</a>
+</div></nav></header>
+<main>
+<div class="hero"><p class="eyebrow">Техническая приёмка · 21 ноября 2026</p><h1>Приёмка и рекламации</h1>
+<p class="lede">Сверка утверждённой сделки S2, документа поставщика и фактической приёмки. Акт и проект претензии остаются в карточке Bitrix24.</p>
+<div class="kpis">
+<div class="kpi"><strong>70</strong><span>синтетических циклов</span></div>
+<div class="kpi"><strong>24/35</strong><span>автоклассификация на профиль</span></div>
+<div class="kpi"><strong>2</strong><span>сквозных прогона на живом портале</span></div>
+</div></div>
+<section><h2>От допуска до решения</h2><ol class="flow">
+<li><strong>Подтверждение S1</strong><span>Допуск и лимит контрагента.</span></li>
+<li><strong>Присуждение S2</strong><span>Победитель, цены, объём и срок.</span></li>
+<li><strong>3-Way Match</strong><span>Сопоставление документа, эталона и фактических расхождений.</span></li>
+<li><strong>Решение S3</strong><span>Ручное подтверждение и финальный акт в Bitrix24.</span></li>
+</ol></section>
+<section id="benchmark"><h2>Результаты benchmark</h2>
+<div class="table-wrap" tabindex="0" role="region" aria-label="Таблица метрик">
+<table class="metric"><thead><tr><th scope="col">Метрика</th><th scope="col">Базовый B2B</th><th scope="col">Стройпоставка</th></tr></thead>
+<tbody><tr><th scope="row">Автоклассификация</th><td>24/35 · 68,6%</td><td>24/35 · 68,6%</td></tr>
+<tr><th scope="row">Ручная проверка</th><td>11/35 · 31,4%</td><td>11/35 · 31,4%</td></tr>
+<tr><th scope="row">p50 / p95, мс</th><td>596,53 / 719,11</td><td>608,18 / 714,39</td></tr>
+<tr><th scope="row">Претензии · TP / FP / FN</th><td>23 / 0 / 0</td><td>17 / 0 / 0</td></tr>
+<tr><th scope="row">Блокирующие ошибки · TP / FP / FN</th><td>4 / 0 / 0</td><td>4 / 0 / 0</td></tr>
+<tr><th scope="row">Расход LLM, ₽</th><td>0</td><td>0</td></tr>
+<tr><th scope="row">Повторы без повторного расхода</th><td>7</td><td>7</td></tr></tbody></table></div>
+<p class="muted">35 одинаковых синтетических пакетов на профиль. Латентность включает извлечение, расчёт и SQLite. Претензия считается выявленной при положительной сумме, в том числе при ручной проверке из-за её размера.</p>
+</section>
+<section id="portal"><h2>Два акта из живого прогона</h2>
+<p class="muted">Тестовые сделки и документы. Bitrix24, процесс 1048, категория 19, профиль 5. Повторы сохранили одну карточку и по одному комментарию на очередь и финал.</p>
+<div class="cards">
+<article class="card"><h3>A · ACCEPTED</h3><p>S3 №1 · S2 №5 · победитель S1 №9</p>
+<p><strong>90 000 ₽ принято</strong> · претензия 0 ₽</p>
+<p>Очередь 55 → SUCCESS 57. Комментарии №119 и №125.</p>
+<details><summary>Акт сверки A</summary><pre># Акт сверки поставки
+Пакет 94453147-4662-44ac-add0-0d36cca79268
+S1 №9, S2 №5, ИНН 9900943406
+Поставщик Synthetic S1 #9
+Договорный срок 4 дн., отсрочка 15 дн., лимит 250000.00 ₽
+- UPD №S3.4-s34-live-A-UPD от 2026-11-21, предъявление на 4 день
+
+| Код | Ед. | Заказ | Поставка | Брак | Принято | Недостача | Излишек | Откл. цены |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| TUBE | pc | 1.000 | 1.000 | 0.000 | 1.000 | 0.000 | 0.000 | 0.00 |
+
+Принято 90000.00 ₽. Недопоставка и брак 0.00 ₽. Отклонение цены 0.00 ₽. Просрочка 0 дн. Пеня 0.00 ₽.
+
+## Проект претензии
+Сумма требования 0.00 ₽.
+
+[S1](/crm/type/1040/details/9/) | [S2](/crm/type/1044/details/5/)</pre></details></article>
+<article class="card review"><h3>B · CLAIM_REQUIRED</h3><p>S3 №3 · S2 №7 · победитель S1 №13</p>
+<p><strong>67 500 ₽ принято</strong> · претензия 22 500 ₽</p>
+<p>Очередь 55 → FAIL 59. Комментарии №151 и №157.</p>
+<details><summary>Акт сверки B</summary><pre># Акт сверки поставки
+Пакет 407ab4fa-b8fb-49ec-aea7-2a7b7a34fb04
+S1 №13, S2 №7, ИНН 9900943420
+Поставщик Synthetic S1 #13
+Договорный срок 4 дн., отсрочка 15 дн., лимит 250000.00 ₽
+- UPD №S3.4-s34-live-B-UPD от 2026-11-21, предъявление на 4 день
+
+| Код | Ед. | Заказ | Поставка | Брак | Принято | Недостача | Излишек | Откл. цены |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| TUBE | pc | 1.000 | 0.750 | 0.000 | 0.750 | 0.250 | 0.000 | 0.00 |
+
+Принято 67500.00 ₽. Недопоставка и брак 22500.00 ₽. Отклонение цены 0.00 ₽. Просрочка 0 дн. Пеня 0.00 ₽.
+
+## Проект претензии
+Сумма требования 22500.00 ₽.
+
+[S1](/crm/type/1040/details/13/) | [S2](/crm/type/1044/details/7/)</pre></details></article>
+</div></section>
+<section id="economics"><h2>Калькулятор эффекта</h2>
+<p class="muted">Значения по умолчанию — пилотные допущения. Для взыскания указывайте сопоставимую базу подтверждённых требований и доли фактических оплат или зачётов.</p>
+<div class="calc">
+<form class="inputs" id="inputs">
+<label>Приёмок в месяц<input id="packages" type="number" min="0" step="1" value="500" required></label>
+<label>Экономия минут на пакет<input id="minutes" type="number" min="0" step="any" value="12" required></label>
+<label>Стоимость часа, ₽<input id="hourRate" type="number" min="0" step="any" value="1000" required></label>
+<label>База претензий в месяц, ₽<input id="claimsBase" type="number" min="0" step="any" value="250000" required></label>
+<label>Доля взыскания до, %<input id="baseline" type="number" min="0" max="100" step="any" value="30" required></label>
+<label>Доля взыскания после, %<input id="target" type="number" min="0" max="100" step="any" value="45" required></label>
+<label>Расходы в месяц, ₽<input id="opsCost" type="number" min="0" step="any" value="35000" required></label>
+<label>Внедрение, ₽<input id="setupCost" type="number" min="0" step="any" value="250000" required></label>
+</form>
+<div class="out" aria-live="polite">
+<p>Экономия времени, ₽/мес.<strong id="labour">—</strong></p>
+<p>Дополнительное взыскание, ₽/мес.<strong id="collection">—</strong></p>
+<p>Чистый эффект, ₽/мес.<strong id="net">—</strong></p>
+<p>Окупаемость, мес.<strong id="payback">—</strong></p>
+<p>Простой ROI за 12 месяцев<strong id="roi">—</strong></p>
+</div></div>
+</section>
+</main>
+<footer><a href="../passport_s3.md">Паспорт S3 и методика расчёта</a></footer>
+<script>
+const inputs = document.getElementById('inputs');
+const format = new Intl.NumberFormat('ru-RU', {maximumFractionDigits: 2});
+function calculate() {
+  const fields = [...inputs.querySelectorAll('input')];
+  const valid = fields.every(field => field.validity.valid && Number.isFinite(field.valueAsNumber));
+  const [packages, minutes, rate, base, before, after, monthlyCost, initial] =
+    fields.map(field => field.valueAsNumber);
+  const labour = packages * minutes * rate / 60;
+  const collection = base * (after - before) / 100;
+  const net = labour + collection - monthlyCost;
+  const payback = net > 0 ? initial / net : NaN;
+  const roi = initial > 0 ? (net * 12 - initial) / initial * 100 : NaN;
+  for (const [id, value] of Object.entries({labour, collection, net, payback, roi})) {
+    document.getElementById(id).textContent =
+      valid && Number.isFinite(value) ? format.format(value) + (id === 'roi' ? '%' : '') : '—';
+  }
+}
+inputs.addEventListener('input', calculate);
+inputs.addEventListener('submit', event => event.preventDefault());
+calculate();
+</script>
+</body>
+</html>

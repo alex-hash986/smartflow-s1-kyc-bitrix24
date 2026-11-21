@@ -6,7 +6,7 @@ from decimal import Decimal
 from typing import Any, Generic, Literal, TypeVar
 
 import httpx
-from pydantic import BaseModel, TypeAdapter
+from pydantic import BaseModel, JsonValue, TypeAdapter
 
 from core.config import ModelRate, Settings
 from core.contracts import JSONObject, Mode
@@ -119,18 +119,22 @@ class LLMGateway:
         budget: CycleBudget,
         *,
         max_output_tokens: int = 512,
+        system_prompt: str | None = None,
     ) -> GatewayResult[T]:
         if not 1 <= max_output_tokens <= 32768:
             raise ValueError("Invalid output token limit")
+        messages: list[JsonValue] = [{"role": "user", "content": prompt}]
+        if system_prompt is not None:
+            messages.insert(0, {"role": "system", "content": system_prompt})
         raw = await self._request(
             role,
             "chat/completions",
             {
-                "messages": [{"role": "user", "content": prompt}],
+                "messages": messages,
                 "response_format": {"type": "json_object"},
                 "max_tokens": max_output_tokens,
             },
-            prompt,
+            prompt if system_prompt is None else system_prompt + "\n" + prompt,
             budget,
             max_output_tokens,
         )

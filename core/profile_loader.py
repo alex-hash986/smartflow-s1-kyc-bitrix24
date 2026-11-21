@@ -225,6 +225,98 @@ class S2Profile(StrictDTO):
         return value
 
 
+class S3StatusValues(StrictDTO):
+    ACCEPTED: PositiveID | None
+    CLAIM_REQUIRED: PositiveID | None
+    REVIEW_REQUIRED: PositiveID | None
+    CLOSED: PositiveID | None
+
+
+class S3StageIDs(StrictDTO):
+    initial: Nonempty | None = None
+    review: Nonempty | None
+    accepted: Nonempty | None
+    claim_required: Nonempty | None
+    closed: Nonempty | None
+
+
+class S3BitrixFields(StrictDTO):
+    ACCEPTANCE_STATUS: Nonempty | None
+    S2_ITEM_ID: Nonempty | None
+    SUPPLIER_INN: Nonempty | None
+    ACCEPTED_AMOUNT_RUB: Nonempty | None
+    CLAIM_AMOUNT_RUB: Nonempty | None
+    EXTERNAL_KEY: Nonempty | None
+
+
+class S3BitrixProfile(StrictDTO):
+    type_id: PositiveID | None
+    entity_type_id: PositiveID | None
+    category_id: NonnegativeInt | None
+    responsible_id: PositiveID | None
+    stage_ids: S3StageIDs
+    fields: S3BitrixFields
+    status_values: S3StatusValues
+
+    @model_validator(mode="after")
+    def check_distinct_mappings(self) -> Self:
+        for mapping in (self.stage_ids, self.fields, self.status_values):
+            values = [value for value in mapping.model_dump().values() if value is not None]
+            if len(set(values)) != len(values):
+                raise ValueError("S3 Bitrix mappings must be distinct within each group")
+        return self
+
+
+class S3ExtractionProfile(ExtractionProfile):
+    max_pdf_pages: PositiveID = 100
+
+
+class S3Profile(StrictDTO):
+    enabled: StrictBool
+    tasks_enabled: Literal[False] = False
+    penalty_confirmation: Literal["verified_contract_evidence"] = "verified_contract_evidence"
+    extraction: S3ExtractionProfile
+    quantity_tolerance_pct: DecimalString
+    price_tolerance_pct: DecimalString
+    daily_penalty_pct: DecimalString
+    max_penalty_pct: DecimalString
+    manual_claim_threshold_rub: DecimalString
+    bitrix24: S3BitrixProfile
+
+    @field_validator(
+        "quantity_tolerance_pct", "price_tolerance_pct", "daily_penalty_pct", "max_penalty_pct"
+    )
+    @classmethod
+    def check_percentage(cls, value: str) -> str:
+        if Decimal(value) > 100:
+            raise ValueError("S3 percentages must be at most 100")
+        return value
+
+    @model_validator(mode="after")
+    def check_claim_policy(self) -> Self:
+        if self.enabled and (
+            any(
+                getattr(self.bitrix24, field) is None
+                for field in ("type_id", "entity_type_id", "category_id", "responsible_id")
+            )
+            or any(
+                value is None
+                for group in (
+                    self.bitrix24.fields,
+                    self.bitrix24.stage_ids,
+                    self.bitrix24.status_values,
+                )
+                for value in group.model_dump(exclude={"initial"}).values()
+            )
+        ):
+            raise ValueError("Enabled S3 requires complete Bitrix bindings")
+        if Decimal(self.daily_penalty_pct) > Decimal(self.max_penalty_pct):
+            raise ValueError("S3 daily penalty cannot exceed the cap")
+        if not 0 < Decimal(self.manual_claim_threshold_rub) < 10**18:
+            raise ValueError("S3 manual claim threshold is outside the supported range")
+        return self
+
+
 class Profile(StrictDTO):
     slug: Nonempty
     revision: Nonempty
@@ -235,6 +327,7 @@ class Profile(StrictDTO):
     escalation_reasons: list[Nonempty] = Field(default_factory=list)
     s1_kyc: S1Profile | None = None
     s2_tender: S2Profile | None = None
+    s3_claims: S3Profile | None = None
     template: StrictBool = False
 
     @field_validator("timezone")

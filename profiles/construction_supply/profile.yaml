@@ -92,3 +92,38 @@ s2_tender:
       AWARDED: null
       REVIEW_REQUIRED: null
       CANCELLED: null
+
+# Проект S3.1. Активация требует новой ревизии и подтверждённых привязок.
+s3_claims:
+  enabled: false
+  extraction:
+    max_text_chars: 50000
+    max_pdf_bytes: 10485760
+    max_pdf_pages: 100
+  quantity_tolerance_pct: '1.00'
+  price_tolerance_pct: '0.50'
+  daily_penalty_pct: '0.10'
+  max_penalty_pct: '10.00'
+  manual_claim_threshold_rub: '100000.00'
+  bitrix24:
+    type_id: null
+    entity_type_id: null
+    category_id: null
+    responsible_id: null
+    stage_ids:
+      review: null
+      accepted: null
+      claim_required: null
+      closed: null
+    fields:
+      ACCEPTANCE_STATUS: null
+      S2_ITEM_ID: null
+      SUPPLIER_INN: null
+      ACCEPTED_AMOUNT_RUB: null
+      CLAIM_AMOUNT_RUB: null
+      EXTERNAL_KEY: null
+    status_values:
+      ACCEPTED: null
+      CLAIM_REQUIRED: null
+      REVIEW_REQUIRED: null
+      CLOSED: null

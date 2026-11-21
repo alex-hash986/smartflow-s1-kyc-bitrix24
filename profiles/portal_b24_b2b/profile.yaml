@@ -1,5 +1,5 @@
 slug: portal_b24_b2b
-revision: '4'
+revision: '5'
 template: false
 tenant_id: portal_b24_b2b
 portal_id: b24-c53p0d.bitrix24.ru
@@ -131,3 +131,39 @@ s2_tender:
       AWARDED: 49
       REVIEW_REQUIRED: 51
       CANCELLED: 53
+s3_claims:
+  enabled: true
+  extraction:
+    max_text_chars: 50000
+    max_pdf_bytes: 10485760
+    max_pdf_pages: 100
+  quantity_tolerance_pct: '0.00'
+  price_tolerance_pct: '0.00'
+  daily_penalty_pct: '0.10'
+  max_penalty_pct: '10.00'
+  manual_claim_threshold_rub: '50000.00'
+  bitrix24:
+    type_id: 11
+    entity_type_id: 1048
+    category_id: 19
+    responsible_id: 1
+    stage_ids:
+      initial: DT1048_19:NEW
+      review: DT1048_19:S3_REVIEW
+      accepted: DT1048_19:SUCCESS
+      claim_required: DT1048_19:FAIL
+      closed: DT1048_19:S3_CLOSED
+    fields:
+      ACCEPTANCE_STATUS: ufCrm11AcceptanceStatus
+      S2_ITEM_ID: ufCrm_11_S2_ITEM_ID
+      SUPPLIER_INN: ufCrm11SupplierInn
+      ACCEPTED_AMOUNT_RUB: ufCrm11AcceptedAmountRub
+      CLAIM_AMOUNT_RUB: ufCrm11ClaimAmountRub
+      EXTERNAL_KEY: ufCrm11ExternalKey
+    status_values:
+      REVIEW_REQUIRED: 55
+      ACCEPTED: 57
+      CLAIM_REQUIRED: 59
+      CLOSED: 61
+  tasks_enabled: false
+  penalty_confirmation: verified_contract_evidence

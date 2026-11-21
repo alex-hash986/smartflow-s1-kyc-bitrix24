@@ -30,7 +30,7 @@ class Publisher:
                    FROM crm_publications AS p LEFT JOIN crm_publication_comments AS c
                    USING (tenant_id,request_id,stage,purpose)
                    WHERE p.tenant_id=? AND p.request_id=? AND p.stage=? AND p.purpose=?""",
-                (key.tenant_id, str(key.request_id), key.stage, key.purpose),
+                self.journal._key(key),
             ).fetchone()
         if row is None:
             raise Conflict("Publication has not been approved")
@@ -69,13 +69,20 @@ class Publisher:
                 with self.journal.db.connect() as conn:
                     review = conn.execute(
                         """SELECT item_id FROM crm_publications WHERE tenant_id=? AND request_id=?
-                           AND stage=? AND purpose='human_review' AND status='published'""",
-                        (key.tenant_id, str(key.request_id), key.stage),
+                           AND stage=? AND purpose=? AND status='published'""",
+                        (
+                            key.tenant_id,
+                            str(key.request_id),
+                            key.stage,
+                            f"human_review:{command.stage_attempt}"
+                            if key.stage == "S3"
+                            else "human_review",
+                        ),
                     ).fetchone()
                 if review is not None and (
                     existing is None or str(existing.get("id")) != str(review["item_id"])
                 ):
-                    raise Conflict("The confirmed S2 review card could not be found")
+                    raise Conflict("The confirmed review card could not be found")
             if not await asyncio.to_thread(self.journal.begin_step, key, token, "item"):
                 raise Conflict("Publication item step is not available")
             fields = {**command.fields, command.external_key_field: card_marker}

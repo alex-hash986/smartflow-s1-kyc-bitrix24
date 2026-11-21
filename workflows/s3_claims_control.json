@@ -1,0 +1,1073 @@
+{
+  "id": "SmartflowS3Claims",
+  "name": "S3 Claims Control",
+  "nodes": [
+    {
+      "id": "e8e31476-a304-5681-b9a7-c0693efb5516",
+      "name": "Acceptance webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "s3-claims-control",
+        "authentication": "headerAuth",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "webhookId": "0588b533-79c2-5498-8be5-f508a12932a2"
+    },
+    {
+      "id": "d4a2e2c0-6f2d-572f-b3f8-ce6475e6c402",
+      "name": "Decision webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        460
+      ],
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "s3-claims-decision",
+        "authentication": "headerAuth",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "webhookId": "4dcff4f9-5f23-5b37-9867-58d2dfe03017"
+    },
+    {
+      "id": "c1cc9e7e-2a01-58fa-836f-7a96359a0e94",
+      "name": "Normalize acceptance",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        240,
+        0
+      ],
+      "parameters": {
+        "jsCode": "const b = $input.first().json.body ?? {};\nconst uuid = v => typeof v === 'string' && /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(v);\nconst positive = v => Number.isSafeInteger(v) && v > 0;\nconst fail = [{json:{statusCode:422,body:{detail:'Invalid S3 event'}}}];\nif (!uuid(b.request_id)) return fail;\nconst context = {tenant_id:'portal_b24_b2b', profile_slug:'portal_b24_b2b', profile_revision:'5', request_id:b.request_id};\nconst attempt = b.attempt ?? 1;\nif (!positive(attempt) || !positive(b.s2_item_id) || typeof b.delivery_key !== 'string'\n    || !b.delivery_key.trim() || !Array.isArray(b.documents) || !b.documents.length\n    || typeof b.received_at !== 'string' || !Number.isFinite(Date.parse(b.received_at))) return fail;\nreturn [{json:{statusCode:200,attempt,received_at:b.received_at,body:{\n  ...context, s2_item_id:b.s2_item_id, delivery_key:b.delivery_key.trim(), documents:b.documents\n}}}];"
+      }
+    },
+    {
+      "id": "e21a58e8-4efb-5ec3-992b-e37c933fd738",
+      "name": "Normalize decision",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        240,
+        460
+      ],
+      "parameters": {
+        "jsCode": "const b = $input.first().json.body ?? {};\nconst uuid = v => typeof v === 'string' && /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(v);\nconst positive = v => Number.isSafeInteger(v) && v > 0;\nconst fail = [{json:{statusCode:422,body:{detail:'Invalid S3 event'}}}];\nconst context = {tenant_id:'portal_b24_b2b', profile_slug:'portal_b24_b2b', profile_revision:'5'};\nif (uuid(b.request_id) && uuid(b.package_id) && positive(b.attempt)) {\n  return [{json:{statusCode:200,body:{...context,request_id:b.request_id,package_id:b.package_id,attempt:b.attempt}}}];\n}\nconst rawItem = b.item_id ?? (b.event === 'ONCRMDYNAMICITEMUPDATE'\n  ? (b.data?.FIELDS?.ID ?? b['data[FIELDS][ID]']) : null);\nconst item_id = typeof rawItem === 'string' && /^[1-9][0-9]*$/.test(rawItem) ? Number(rawItem) : rawItem;\nif (!positive(item_id)) return fail;\nreturn [{json:{statusCode:200,body:{...context,item_id}}}];"
+      }
+    },
+    {
+      "id": "6841eeca-1c18-525d-b572-0b55b3b2bcff",
+      "name": "Register package",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        720,
+        0
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "http://host.docker.internal:8021/s3/intake",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.body }}",
+        "options": {
+          "timeout": 120000,
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "2263b654-7a96-5893-8cb8-25979376400a",
+      "name": "Verify tender award",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1200,
+        0
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "http://host.docker.internal:8021/s3/tender-gate",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ (() => { const {tenant_id,request_id,profile_slug,profile_revision,package_id,s2_item_id} = $('Register package').first().json.body;\nconst context = {tenant_id,request_id,profile_slug,profile_revision}; return {...context,package_id}; })() }}",
+        "options": {
+          "timeout": 120000,
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "bd79521a-b82e-5a41-89ec-25aa5a271733",
+      "name": "Parse documents",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1680,
+        0
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "http://host.docker.internal:8021/s3/parse",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ (() => { const {tenant_id,request_id,profile_slug,profile_revision,package_id,s2_item_id} = $('Register package').first().json.body;\nconst context = {tenant_id,request_id,profile_slug,profile_revision}; return {...context,payload:{package_id} }; })() }}",
+        "options": {
+          "timeout": 120000,
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "50a809b8-1821-531c-b020-c23b3aba6915",
+      "name": "Evaluate acceptance",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2160,
+        0
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "http://host.docker.internal:8021/s3/evaluate",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ (() => { const {tenant_id,request_id,profile_slug,profile_revision,package_id,s2_item_id} = $('Register package').first().json.body;\nconst context = {tenant_id,request_id,profile_slug,profile_revision}; const input = $('Normalize acceptance').first().json;\nconst gate = $('Verify tender award').first().json.body;\nreturn {...context, schema_version:'1',stage:'S3',attempt:input.attempt,received_at:input.received_at,\n  upstream_item:{entity_type_id:1044,item_id:s2_item_id},payload:{package_id,award:gate.award,documents:$json.body.payload.documents} }; })() }}",
+        "options": {
+          "timeout": 120000,
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "0162c4c8-86b7-5dbe-b4e8-8be0a6b472d4",
+      "name": "Build review publication",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2640,
+        0
+      ],
+      "parameters": {
+        "jsCode": "const body = (() => { const {tenant_id,request_id,profile_slug,profile_revision,package_id,s2_item_id} = $('Register package').first().json.body;\nconst context = {tenant_id,request_id,profile_slug,profile_revision}; return {...context,package_id,attempt:$input.first().json.body.attempt}; })();\nreturn [{json:{body}}];"
+      }
+    },
+    {
+      "id": "f2d42f9c-d93f-5a64-a3f5-2c9dc3987754",
+      "name": "Verify portal decision",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1440,
+        460
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "http://host.docker.internal:8021/s3/publication/decision",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.body }}",
+        "options": {
+          "timeout": 120000,
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "a0238a85-d70b-5ae2-aeee-3036dbb2a031",
+      "name": "Build final publication",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1920,
+        460
+      ],
+      "parameters": {
+        "jsCode": "const source = $('Resolve current review').isExecuted ? $('Resolve current review') : $('Normalize decision');\nreturn [{json:{body:source.first().json.body}}];"
+      }
+    },
+    {
+      "id": "409361b1-145b-550f-895a-8f526ac3c221",
+      "name": "Prepare publication",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2880,
+        180
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "http://host.docker.internal:8021/s3/publication/prepare",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.body }}",
+        "options": {
+          "timeout": 120000,
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "dce82576-6db1-55ac-b20c-80dc398834a7",
+      "name": "Throttle dispatcher",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3360,
+        180
+      ],
+      "parameters": {
+        "jsCode": "const data = $input.first().json;\nawait new Promise(resolve => setTimeout(resolve, 600));\nreturn [{json:data}];"
+      }
+    },
+    {
+      "id": "41db03d8-a8c5-5b91-bc96-0d67e61bf384",
+      "name": "Dispatch publication",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        3600,
+        180
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "http://host.docker.internal:8021/v1/publications/dispatch",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.body }}",
+        "options": {
+          "timeout": 120000,
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "2e24a356-78d4-59fc-913d-bb41a964007c",
+      "name": "Safe response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3840,
+        360
+      ],
+      "parameters": {
+        "jsCode": "const result = $input.first().json;\nconst status = result.statusCode;\nif (status === 200 && typeof result.body?.status === 'string') {\n  const {status: publication_status, item_id, comment_id} = result.body;\n  const statusCode = publication_status === 'published' ? 200 : (publication_status === 'reconcile' ? 409 : 202);\n  const source = $('Build final publication').isExecuted ? $('Build final publication') : $('Build review publication');\n  const {request_id, package_id, attempt} = source.first().json.body;\n  return [{json:{statusCode,body:{publication_status,item_id,comment_id,request_id,package_id,attempt}}}];\n}\nconst messages = {202:'Processing in progress; retry the same delivery',401:'Kernel authentication failed',\n  409:'S3 state or portal decision could not be confirmed',422:'Invalid S3 payload',503:'Kernel or portal temporarily unavailable'};\nreturn [{json:{statusCode:Object.hasOwn(messages,status) ? status : 502,body:{detail:messages[status] ?? 'S3 workflow request failed'}}}];"
+      }
+    },
+    {
+      "id": "0fb1755f-7bfb-5b7b-b76a-c269146248a7",
+      "name": "Respond",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.4,
+      "position": [
+        4080,
+        360
+      ],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ $json.body }}",
+        "options": {
+          "responseCode": "={{ $json.statusCode }}",
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Cache-Control",
+                "value": "no-store"
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "600d0910-3696-5922-a0be-453b2b5d821f",
+      "name": "Acceptance valid",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        480,
+        0
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "952add60-f680-5482-9243-5341c2623dcc",
+              "leftValue": "={{ $json.statusCode === 200 }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "47ee0dd1-201c-590f-bfd7-87096e4b1142",
+      "name": "Package registered",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        960,
+        0
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "abb2b91e-9f30-58c2-b00e-87e563bb26bc",
+              "leftValue": "={{ $json.statusCode === 200 }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "c315c2ee-3d9c-5fe6-a10e-167d6353773b",
+      "name": "Tender gate recorded",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1440,
+        0
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "83f315c2-3686-5476-91f4-668707ed9946",
+              "leftValue": "={{ $json.statusCode === 200 }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "a910869a-983c-593d-83e1-3e2ad0be46db",
+      "name": "Documents parsed",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1920,
+        0
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "82730996-5936-50ff-8463-64fa1c4551dd",
+              "leftValue": "={{ $json.statusCode === 200 }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "08582562-d49a-509c-a486-f258d8021b18",
+      "name": "Acceptance evaluated",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        2400,
+        0
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "026b4c17-f5ed-588a-9a1f-ed1c77266181",
+              "leftValue": "={{ $json.statusCode === 200 }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "0ac6c64c-eb41-54d3-a5c3-a765962549ba",
+      "name": "Decision valid",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        480,
+        460
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "efe10f51-47d8-5501-9e98-60483c1e4c11",
+              "leftValue": "={{ $json.statusCode === 200 }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "718318ed-602a-5379-8ddd-ac3012fba205",
+      "name": "Decision recorded",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1680,
+        460
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "34d3a0de-b282-5f20-b6b5-75eea0ecaaf9",
+              "leftValue": "={{ $json.statusCode === 204 }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "68fc259f-1428-5ac2-9cdb-66f88bb9e56f",
+      "name": "Command prepared",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        3120,
+        180
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "ab689a98-9df9-56aa-bbb4-1689e2c04951",
+              "leftValue": "={{ $json.statusCode === 200 }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "74aad0bf-2b84-5bc2-8fbe-6062477e84c8",
+      "name": "Resolve item event",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        720,
+        540
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "21ce2a27-1fd2-5476-b2e8-2a362a568d4c",
+              "leftValue": "={{ $json.body.item_id !== undefined }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "38f20fd1-fd85-520c-aeab-5c4f259cac20",
+      "name": "Resolve current review",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        960,
+        650
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "http://host.docker.internal:8021/s3/publication/resolve",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.body }}",
+        "options": {
+          "timeout": 120000,
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "962084f7-2197-5ec6-85b5-6d614f5616de",
+      "name": "Review resolved",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1200,
+        650
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "1b7e2a5f-6b0d-5a32-a660-348147a662ee",
+              "leftValue": "={{ $json.statusCode === 200 }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    }
+  ],
+  "connections": {
+    "Acceptance webhook": {
+      "main": [
+        [
+          {
+            "node": "Normalize acceptance",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Decision webhook": {
+      "main": [
+        [
+          {
+            "node": "Normalize decision",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize acceptance": {
+      "main": [
+        [
+          {
+            "node": "Acceptance valid",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Acceptance valid": {
+      "main": [
+        [
+          {
+            "node": "Register package",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Safe response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Register package": {
+      "main": [
+        [
+          {
+            "node": "Package registered",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Package registered": {
+      "main": [
+        [
+          {
+            "node": "Verify tender award",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Safe response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Verify tender award": {
+      "main": [
+        [
+          {
+            "node": "Tender gate recorded",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Tender gate recorded": {
+      "main": [
+        [
+          {
+            "node": "Parse documents",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Safe response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse documents": {
+      "main": [
+        [
+          {
+            "node": "Documents parsed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Documents parsed": {
+      "main": [
+        [
+          {
+            "node": "Evaluate acceptance",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Safe response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Evaluate acceptance": {
+      "main": [
+        [
+          {
+            "node": "Acceptance evaluated",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Acceptance evaluated": {
+      "main": [
+        [
+          {
+            "node": "Build review publication",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Safe response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize decision": {
+      "main": [
+        [
+          {
+            "node": "Decision valid",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Decision valid": {
+      "main": [
+        [
+          {
+            "node": "Resolve item event",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Safe response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Verify portal decision": {
+      "main": [
+        [
+          {
+            "node": "Decision recorded",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Decision recorded": {
+      "main": [
+        [
+          {
+            "node": "Build final publication",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Safe response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare publication": {
+      "main": [
+        [
+          {
+            "node": "Command prepared",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Command prepared": {
+      "main": [
+        [
+          {
+            "node": "Throttle dispatcher",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Safe response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build review publication": {
+      "main": [
+        [
+          {
+            "node": "Prepare publication",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build final publication": {
+      "main": [
+        [
+          {
+            "node": "Prepare publication",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Throttle dispatcher": {
+      "main": [
+        [
+          {
+            "node": "Dispatch publication",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Dispatch publication": {
+      "main": [
+        [
+          {
+            "node": "Safe response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Safe response": {
+      "main": [
+        [
+          {
+            "node": "Respond",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Resolve item event": {
+      "main": [
+        [
+          {
+            "node": "Resolve current review",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Verify portal decision",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Resolve current review": {
+      "main": [
+        [
+          {
+            "node": "Review resolved",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Review resolved": {
+      "main": [
+        [
+          {
+            "node": "Verify portal decision",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Safe response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "saveDataSuccessExecution": "none",
+    "saveDataErrorExecution": "none",
+    "saveManualExecutions": false,
+    "saveExecutionProgress": false
+  }
+}

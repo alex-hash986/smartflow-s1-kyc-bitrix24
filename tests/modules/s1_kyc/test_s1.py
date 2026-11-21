@@ -415,7 +415,11 @@ def test_rejects_invalid_profile(issue: str) -> None:
 def test_live_profile_bindings() -> None:
     bound = load_profile(PROFILES, "portal_b24_b2b")
     archived = load_profile(PROFILES, bound.slug, "3")
-    assert not bound.template and bound.revision == "4"
+    prior = load_profile(PROFILES, bound.slug, "4")
+    assert not bound.template and bound.revision == "5"
+    assert prior.s1_kyc == bound.s1_kyc and prior.stages == bound.stages
+    assert prior.s3_claims is not None and not prior.s3_claims.enabled
+    assert bound.s3_claims is not None and bound.s3_claims.enabled
     assert archived.revision == "3" and archived.s1_kyc == bound.s1_kyc
     stage = bound.stages["S1"]
     assert stage.stage_ids is not None and stage.stage_ids.initial == stage.stage_id

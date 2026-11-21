@@ -1,6 +1,9 @@
+import sqlite3
 from datetime import UTC, datetime
-from typing import Literal
+from typing import Literal, Self
 from uuid import UUID, uuid4
+
+from pydantic import JsonValue, SerializerFunctionWrapHandler, model_serializer, model_validator
 
 from core.contracts import (
     JSONObject,
@@ -45,6 +48,22 @@ class PublicationKey(StrictDTO):
     request_id: UUID
     stage: Stage
     purpose: Purpose
+    review_attempt: PositiveID | None = None
+
+    @model_validator(mode="after")
+    def check_review_attempt(self) -> Self:
+        if (self.stage == "S3" and self.purpose == "human_review") != (
+            self.review_attempt is not None
+        ):
+            raise ValueError("review_attempt is required only for S3 human_review")
+        return self
+
+    @model_serializer(mode="wrap")
+    def serialize_key(self, handler: SerializerFunctionWrapHandler) -> dict[str, JsonValue]:
+        fields: dict[str, JsonValue] = handler(self)
+        if self.review_attempt is None:
+            fields.pop("review_attempt", None)
+        return fields
 
 
 class TaskCommand(StrictDTO):
@@ -136,8 +155,11 @@ class Journal:
             return receipt
 
     @staticmethod
-    def _key(key: PublicationKey) -> tuple[str, str, Stage, Purpose]:
-        return key.tenant_id, str(key.request_id), key.stage, key.purpose
+    def _key(key: PublicationKey) -> tuple[str, str, Stage, str]:
+        purpose = (
+            key.purpose if key.review_attempt is None else f"human_review:{key.review_attempt}"
+        )
+        return key.tenant_id, str(key.request_id), key.stage, purpose
 
     def record_decision(self, decision: PublicationDecision) -> None:
         """Persist an already verified external decision from a trusted adapter."""
@@ -195,8 +217,20 @@ class Journal:
                 if prior["command_json"] != serialized:
                     raise Conflict("Publication command is immutable")
                 return marker
+            if (
+                command.key.stage == "S3"
+                and command.card_external_key is None
+                and conn.execute(
+                    """SELECT 1 FROM s3_attempts WHERE tenant_id=? AND request_id=? AND attempt=?""",
+                    (*key[:2], command.stage_attempt),
+                ).fetchone()
+                is not None
+            ):
+                raise Conflict(
+                    "S3 claims publication requires a shared card key and versioned approval"
+                )
             if command.card_external_key is not None:
-                if key[2] != "S2" or command.card_external_key != digest(
+                if key[2] not in ("S2", "S3") or command.card_external_key != digest(
                     [*key[:3], "stage_result"]
                 ):
                     raise Conflict("Invalid shared card key")
@@ -206,7 +240,7 @@ class Journal:
                     key[:3],
                 ).fetchone()[0]
                 if latest != command.stage_attempt:
-                    raise Conflict("S2 publication requires the latest evaluation")
+                    raise Conflict("Publication requires the latest evaluation")
                 if key[3] == "stage_result":
                     decision = conn.execute(
                         """SELECT decision,evidence_ref FROM publication_decisions
@@ -220,16 +254,22 @@ class Journal:
                         raise Conflict("Publication does not match the recorded decision")
                     if decision is None and command.closes_cycle:
                         raise Conflict("Cancellation requires a recorded decision")
+                if key[2] == "S3":
+                    self._verify_s3_approval(conn, command)
                 counterpart = conn.execute(
                     """SELECT status,portal_id,entity_type_id FROM crm_publications
                        WHERE tenant_id=? AND request_id=? AND stage=? AND purpose<>?""",
                     key,
                 ).fetchone()
-                if counterpart is not None and (
-                    key[3] == "human_review"
-                    or counterpart["status"] != "published"
-                    or counterpart["portal_id"] != command.portal_id
-                    or counterpart["entity_type_id"] != command.entity_type_id
+                if (
+                    key[2] == "S2"
+                    and counterpart is not None
+                    and (
+                        key[3] == "human_review"
+                        or counterpart["status"] != "published"
+                        or counterpart["portal_id"] != command.portal_id
+                        or counterpart["entity_type_id"] != command.entity_type_id
+                    )
                 ):
                     raise Conflict("The other S2 publication must be resolved first")
             row = conn.execute(
@@ -243,7 +283,7 @@ class Journal:
             response = WorkerResponseEnvelope.model_validate_json(row["response_json"])
             if key[3] == "stage_result" and response.need_human and not human_approved:
                 raise Conflict("This revision requires a human decision")
-            if key[3] == "human_review" and (
+            if command.key.purpose == "human_review" and (
                 (not response.need_human and not (command.card_external_key and allow_review_card))
                 or (
                     (not command.task_required or command.item_id is None)
@@ -278,9 +318,52 @@ class Journal:
                 )
         return marker
 
+    def _verify_s3_approval(self, conn: sqlite3.Connection, command: PublicationCommand) -> None:
+        key = self._key(command.key)
+        row = conn.execute(
+            """SELECT d.evidence_ref FROM s3_attempts AS a JOIN s3_packages AS p
+               USING (tenant_id,request_id,package_id)
+               LEFT JOIN s3_decisions AS d USING (tenant_id,request_id,package_id,attempt)
+               WHERE a.tenant_id=? AND a.request_id=? AND a.attempt=? AND p.active=1""",
+            (*key[:2], command.stage_attempt),
+        ).fetchone()
+        if row is None:
+            raise Conflict("S3 publication requires the active package")
+        if command.key.purpose == "human_review":
+            if command.key.review_attempt != command.stage_attempt:
+                raise Conflict("S3 queue must match its attempt")
+            return
+        if row["evidence_ref"] is None or row["evidence_ref"] != command.approval_ref:
+            raise Conflict("S3 final publication requires the recorded decision")
+        review = conn.execute(
+            """SELECT item_id FROM crm_publications WHERE tenant_id=? AND request_id=?
+               AND stage='S3' AND purpose=? AND status='published'""",
+            (*key[:2], f"human_review:{command.stage_attempt}"),
+        ).fetchone()
+        if review is None:
+            raise Conflict("S3 decision requires a confirmed review card")
+
     def claim(self, key: PublicationKey) -> str | None:
         token = str(uuid4())
         with self.db.transaction() as conn:
+            if key.review_attempt is not None:
+                active = conn.execute(
+                    """SELECT 1 FROM s3_attempts AS a JOIN s3_packages AS p
+                       USING (tenant_id,request_id,package_id)
+                       WHERE a.tenant_id=? AND a.request_id=? AND a.attempt=? AND p.active=1
+                       AND a.attempt=(SELECT MAX(attempt) FROM transaction_stages
+                           WHERE tenant_id=a.tenant_id AND request_id=a.request_id AND stage='S3')""",
+                    (*self._key(key)[:2], key.review_attempt),
+                ).fetchone()
+                if active is None:
+                    prior = conn.execute(
+                        """SELECT status FROM crm_publications WHERE tenant_id=? AND request_id=?
+                           AND stage=? AND purpose=?""",
+                        self._key(key),
+                    ).fetchone()
+                    if prior is None or prior["status"] != "published":
+                        raise Conflict("S3 review attempt was superseded")
+                    return None
             result = conn.execute(
                 """UPDATE crm_publications SET status='publishing', owner_token=?, updated_at=?
                    WHERE tenant_id=? AND request_id=? AND stage=? AND purpose=?
@@ -390,7 +473,7 @@ class Journal:
                        updated_at=? WHERE tenant_id=? AND request_id=?""",
                     ("completed" if completed else "running", elapsed, now, *cycle_key),
                 )
-            elif result.rowcount == 1 and key.stage == "S2":
+            elif result.rowcount == 1 and key.stage in ("S2", "S3"):
                 conn.execute(
                     """UPDATE transaction_telemetry SET outcome='waiting_human',need_human=1,
                        updated_at=? WHERE tenant_id=? AND request_id=?""",

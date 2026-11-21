@@ -5,10 +5,10 @@ from pathlib import Path
 from typing import Literal
 from uuid import UUID
 
-from pydantic import ValidationError
+from pydantic import JsonValue, ValidationError
 
 from core.contracts import WorkerRequestEnvelope, WorkerResponseEnvelope
-from core.database import Database
+from core.database import Database, canonical_json
 from core.idempotency import Conflict, PublicationCommand
 from core.interfaces import BaseSmartWorker, WorkerResult
 from core.llm_gateway import CycleBudget, LLMGateway
@@ -22,6 +22,7 @@ from modules.s2_tender.contracts import (
     S2SupplierGateSnapshot,
 )
 from modules.s2_tender.extractions import ExtractionJournal, S2ParseReply, make_reply
+from modules.s2_tender.matcher import match_items
 from modules.s2_tender.parser import ParseResult, QuoteParser
 from modules.s2_tender.scoring import UPSTREAM_UNCONFIRMED, evaluate
 
@@ -171,6 +172,29 @@ class S2Worker(BaseSmartWorker):
             upstream_confirmed=upstream_confirmed,
             verified_quote_ids=verified_quotes,
         )
+        if result.winner_inn is not None:
+            quote = next(q for q in payload.quotes if q.quote_id == result.participants[0].quote_id)
+            matched = match_items(payload.items, quote.items)
+            assert matched is not None
+            approved: list[JsonValue] = [
+                {
+                    "item_code": item.item_code,
+                    "name": item.name,
+                    "unit": item.unit,
+                    "quantity": str(item.quantity),
+                    "unit_price_rub": str(matched[item.item_code].unit_price_rub),
+                    "line_total_rub": str(matched[item.item_code].total_rub),
+                }
+                for item in payload.items
+            ]
+            with self.db.transaction() as conn:
+                conn.execute(
+                    """INSERT INTO s2_award_items (tenant_id,request_id,attempt,items_json)
+                       SELECT tenant_id,request_id,attempt,? FROM transaction_stages
+                       WHERE tenant_id=? AND request_id=? AND stage='S2' AND attempt=?
+                       AND status='running' ON CONFLICT DO NOTHING""",
+                    (canonical_json(approved), *key, request.attempt),
+                )
         return WorkerResult(
             WorkerResponseEnvelope(
                 **request.model_dump(exclude={"payload", "received_at", "upstream_item"}),

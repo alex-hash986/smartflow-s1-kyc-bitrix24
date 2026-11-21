@@ -3,6 +3,7 @@ import secrets
 import sqlite3
 from collections.abc import AsyncIterator, Mapping
 from contextlib import asynccontextmanager
+from functools import partial
 from typing import Annotated
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Request
@@ -33,6 +34,22 @@ from modules.s2_tender.intake import (
 )
 from modules.s2_tender.module import S2Worker
 from modules.s2_tender.publication import S2PublicationRequest, prepare_s2_publication
+from modules.s3_claims.contracts import (
+    S3IntakeReceipt,
+    S3IntakeRequest,
+    S3ParseCall,
+    S3ParseReply,
+    S3PublicationRequest,
+    S3TenderGateRequest,
+    S3TenderGateResponse,
+)
+from modules.s3_claims.module import S3Worker, context
+from modules.s3_claims.publication import (
+    S3DecisionNotice,
+    confirm_decision,
+    prepare,
+    resolve_decision_notice,
+)
 
 
 def create_app(
@@ -49,8 +66,10 @@ def create_app(
     s1 = S1Worker(settings.profiles_path, llm, db)
     registered.setdefault("S1", s1)
     s2 = S2Worker(settings.profiles_path, llm, db)
+    s3 = S3Worker(settings.profiles_path, llm, db)
     if workers is None:
         registered["S2"] = s2
+        registered["S3"] = s3
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
@@ -117,12 +136,19 @@ def create_app(
                 await asyncio.to_thread(worker.validate_request, envelope)
             else:
                 worker.request_payload.model_validate(envelope.payload)
+                if isinstance(worker, S3Worker):
+                    await asyncio.to_thread(worker.profile, context(envelope))
         except ValueError as exc:
             if isinstance(exc, Conflict):
                 raise
             raise HTTPException(422, "Invalid worker input payload") from None
         attempt = await asyncio.to_thread(
-            telemetry.reserve, envelope, verify_s2_in_worker=isinstance(worker, S2Worker)
+            telemetry.reserve,
+            envelope,
+            verify_s2_in_worker=isinstance(worker, S2Worker),
+            pin_attempt=partial(worker.pin_attempt, envelope)
+            if isinstance(worker, S3Worker)
+            else None,
         )
         if attempt.response is not None:
             return attempt.response
@@ -251,6 +277,58 @@ def create_app(
         if publisher is None:
             raise HTTPException(503, "No publication dispatcher configured")
         return prepare_s2_publication(journal, settings.profiles_path, publisher.portal_id, call)
+
+    @app.post("/s3/intake", dependencies=[Depends(authenticate)])
+    def intake_s3(call: S3IntakeRequest) -> S3IntakeReceipt:
+        return s3.intake(call)
+
+    @app.post("/s3/tender-gate", dependencies=[Depends(authenticate)])
+    async def gate_s3(call: S3TenderGateRequest) -> S3TenderGateResponse:
+        if publisher is None:
+            raise HTTPException(503, "No publication dispatcher configured")
+        try:
+            return await s3.gate(call, publisher)
+        except BitrixError:
+            raise HTTPException(503, "S2 portal read unavailable") from None
+
+    @app.post("/s3/parse", response_model=S3ParseReply, dependencies=[Depends(authenticate)])
+    async def parse_s3(call: S3ParseCall) -> S3ParseReply | JSONResponse:
+        reply = await asyncio.shield(s3.parse(call, settings.max_cycle_cost_rub))
+        if reply == "running":
+            return JSONResponse(
+                {"status": "running"}, status_code=202, headers={"Retry-After": "1"}
+            )
+        return reply
+
+    @app.post(
+        "/s3/evaluate", response_model=WorkerResponseEnvelope, dependencies=[Depends(authenticate)]
+    )
+    async def evaluate_s3(envelope: WorkerRequestEnvelope) -> WorkerResponseEnvelope | JSONResponse:
+        return await run("S3", envelope)
+
+    @app.post("/s3/publication/resolve", dependencies=[Depends(authenticate)])
+    def resolve_s3(call: S3DecisionNotice) -> S3PublicationRequest:
+        if publisher is None:
+            raise HTTPException(503, "No publication dispatcher configured")
+        return resolve_decision_notice(s3, publisher, call)
+
+    @app.post("/s3/publication/decision", dependencies=[Depends(authenticate)], status_code=204)
+    async def decision_s3(call: S3PublicationRequest) -> None:
+        if publisher is None:
+            raise HTTPException(503, "No publication dispatcher configured")
+        try:
+            await confirm_decision(s3, publisher, call)
+        except BitrixError:
+            raise HTTPException(503, "S3 decision portal read unavailable") from None
+
+    @app.post("/s3/publication/prepare", dependencies=[Depends(authenticate)])
+    async def prepare_s3(call: S3PublicationRequest) -> PublicationKey:
+        if publisher is None:
+            raise HTTPException(503, "No publication dispatcher configured")
+        try:
+            return await prepare(s3, publisher, call)
+        except BitrixError:
+            raise HTTPException(503, "S2 portal read unavailable") from None
 
     @app.post("/v1/publications/dispatch", dependencies=[Depends(authenticate)])
     async def dispatch(key: PublicationKey) -> dict[str, str | int | None]:

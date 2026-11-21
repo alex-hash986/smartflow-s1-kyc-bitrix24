@@ -81,7 +81,9 @@ def test_s2_workflow_has_authenticated_complete_paths() -> None:
         assert [name for name in success[0] if name in routes] == success_routes
     assert visited == set(nodes)
 
-    profile = load_profile(ROOT / "profiles", "portal_b24_b2b")
+    profile = load_profile(ROOT / "profiles", "portal_b24_b2b", "4")
+    current = load_profile(ROOT / "profiles", "portal_b24_b2b")
+    assert current.s2_tender == profile.s2_tender
     assert profile.revision == "4" and profile.s2_tender is not None
     assert (
         f"profile_revision:'{profile.revision}'"

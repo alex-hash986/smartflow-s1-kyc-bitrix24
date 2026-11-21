@@ -42,7 +42,10 @@ class Database:
                     "SELECT sql FROM sqlite_master WHERE name='crm_publications' AND type='table'"
                 ).fetchone()
                 definition = "CREATE TABLE IF NOT EXISTS crm_publications ("
-                if table is not None and "purpose <> 'human_review' OR task_required" in table[0]:
+                if table is not None and (
+                    "human_review:" not in table[0]
+                    or "purpose <> 'human_review' OR task_required" in table[0]
+                ):
                     ddl = definition + script.split(definition, 1)[1].split(") STRICT;", 1)[0]
                     conn.execute("ALTER TABLE crm_publications RENAME TO crm_publications_legacy")
                     conn.execute(ddl + ") STRICT")

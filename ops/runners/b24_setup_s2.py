@@ -57,17 +57,23 @@ WRITE_METHODS: tuple[Method, ...] = (
 
 
 async def discover_stages(
-    client: BitrixClient, entity_id: int, category_id: int, apply: bool
+    client: BitrixClient,
+    entity_id: int,
+    category_id: int,
+    apply: bool,
+    *,
+    definitions: dict[str, tuple[str, str, str]] = STAGES,
+    custom: frozenset[str] = frozenset({"review"}),
 ) -> dict[str, str]:
     directory = f"DYNAMIC_{entity_id}_STAGE_{category_id}"
     prefix = f"DT{entity_id}_{category_id}:"
     rows = await pages(client, "crm.status.list", {"filter": {"ENTITY_ID": directory}})
     stages = {}
-    for key, (suffix, semantics, name) in STAGES.items():
+    for key, (suffix, semantics, name) in definitions.items():
         code = prefix + suffix
         row = one(rows, "STATUS_ID", code)
         if row is None:
-            if key != "review":
+            if key not in custom:
                 raise ValueError(f"Missing built-in stage {code}")
             if apply:
                 await client.setup_call(
@@ -78,7 +84,7 @@ async def discover_stages(
                             "STATUS_ID": suffix,
                             "NAME": name,
                             "SEMANTICS": "",
-                            "SORT": 30,
+                            "SORT": 30 if key == "review" else 35,
                         }
                     },
                     write=True,
@@ -93,11 +99,21 @@ async def discover_stages(
                 write=True,
             )
         stages[key] = code
-    return await discover_stages(client, entity_id, category_id, False) if apply else stages
+    if apply:
+        return await discover_stages(
+            client, entity_id, category_id, False, definitions=definitions, custom=custom
+        )
+    return stages
 
 
 async def discover_fields(
-    client: BitrixClient, type_id: int, entity_id: int, apply: bool
+    client: BitrixClient,
+    type_id: int,
+    entity_id: int,
+    apply: bool,
+    *,
+    definitions: dict[str, str] = FIELDS,
+    options_codes: tuple[str, ...] = STATUS,
 ) -> tuple[dict[str, str], dict[str, int]]:
     owner = f"CRM_{type_id}"
     rows = await pages(
@@ -108,7 +124,7 @@ async def discover_fields(
     )
     original_names = {}
     status_ids = {}
-    for logical, field_type in FIELDS.items():
+    for logical, field_type in definitions.items():
         original = f"UF_{owner}_{logical}"
         row = one(rows, "fieldName", original)
         if row is None and apply:
@@ -123,7 +139,7 @@ async def discover_fields(
             if field_type == "enumeration":
                 definition["enum"] = [
                     {"value": code, "xmlId": code, "sort": 100 * index}
-                    for index, code in enumerate(STATUS, 1)
+                    for index, code in enumerate(options_codes, 1)
                 ]
             result, _ = await client.setup_call(
                 "userfieldconfig.add",
@@ -140,7 +156,7 @@ async def discover_fields(
         ):
             raise ValueError(f"Incompatible portal field {original}")
         original_names[logical] = original
-        if logical == "TENDER_STATUS":
+        if field_type == "enumeration":
             result, _ = await client.setup_call(
                 "userfieldconfig.get",
                 {"moduleId": "crm", "id": identifier(row["id"])},
@@ -148,12 +164,12 @@ async def discover_fields(
             options = ROWS.validate_python(
                 OBJECT.validate_python(OBJECT.validate_python(result)["field"])["enum"]
             )
-            if len(options) != len(STATUS):
-                raise ValueError("Unexpected TENDER_STATUS options")
-            for status in STATUS:
+            if len(options) != len(options_codes):
+                raise ValueError(f"Unexpected options for {logical}")
+            for status in options_codes:
                 option = one(options, "value", status)
                 if option is None:
-                    raise ValueError(f"Missing TENDER_STATUS option {status}")
+                    raise ValueError(f"Missing {logical} option {status}")
                 status_ids[status] = identifier(option["id"])
 
     raw, _ = await client.setup_call("crm.item.fields", {"entityTypeId": entity_id})
